@@ -1,0 +1,66 @@
+
+
+//1. Function number and current PID are stored in registers R1 and R2. Give meaningful names to these arguments.
+alias fnno R1;
+alias currentPID R2;
+//R3 has word to be  printed
+
+//Fn3: Terminal write
+//2.  Terminal write function has a function number 3. If the functionNum is 3, implement the following steps else return using return statement.
+if(fnno == 3)  then
+
+	//Call Acquire Terminal -- MOD_0 -- 8
+	//3. Push all the registers used till now in this module using the multipush statement in SPL as done earlier.
+	multipush(R1,R2,R3);
+	//4. Store the function number 8 in register R1 and PID of the current process
+	R1=8;
+	//R2 = currentPID;
+	//5. Call module 0
+	call MOD_0;
+	//6. Ignore the value present in R0 as Acquire Terminal does not have any return value.
+	//7. Use the multipop statement to restore the registers as done earlier. 
+	multipop(R1,R2,R3);
+
+	//Print word
+	//8. Print the word in register R3, using the print statement
+	print R3;
+	
+	//Call Release Terminal -- MOD_0 -- 9
+	//8. Push all the registers used till now using the multipush statement as done earlier.
+	multipush(R1,R2,R3);
+        //9. Store the function number 9 in register R1 and PID of the current process from the System Status table in register R2 (Can use currentPID, as it already contain current PID value).
+	R1 = 9;
+	//10. Call module 0.
+	call MOD_0;
+	//11. Return value will be stored in R0 by module 0. Save this return value in any other register if needed.
+	R4 = R0;
+	//12. Restore the registers using the multipop statement.
+	multipop(R1,R2,R3);
+	//13. Return using the return statement
+	return;
+
+endif;
+
+//Fn4:Terminal Read
+if( fnno==4 ) then
+	//Calling Acquire Terminal fn
+	multipush(R1,R2,R3);
+	R1=8;
+	R2=currentPID;
+	call MOD_0;  //resource manager
+	multipop(R1,R2,R3);
+
+	read;
+
+	[PROCESS_TABLE + 16*currentPID + 4] = WAIT_TERMINAL;
+
+	//Invoking scheduler
+	multipush(R1,R2,R3);
+	call SCHEDULER; //scheduler
+	multipop(R1,R2,R3);
+
+	[[PAGE_TABLE_BASE + 20*currentPID +2*(R3/512)]*512 + (R3%512)]=[PROCESS_TABLE+ 16*currentPID + 8];
+	return;
+endif;
+
+return;

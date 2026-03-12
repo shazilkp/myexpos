@@ -1,0 +1,29 @@
+//storing the user stack pointer into usptr(13th word) of the process tav-ble entry accessed using pid
+//from the system status table
+
+[PROCESS_TABLE + ( [SYSTEM_STATUS_TABLE + 1] * 16) + 13] = SP;
+
+//setting the last address in kernal stack(since empty )
+SP = [PROCESS_TABLE + ([SYSTEM_STATUS_TABLE + 1] * 16) + 11] * 512 - 1;
+backup;
+
+//interrupt handler code
+
+
+[DISK_STATUS_TABLE + 0] = 0;        //status set to 0
+
+
+alias i R3;
+    i = 0;
+    while(i<16)do
+        if([PROCESS_TABLE+i*16+4]==WAIT_DISK)then
+            [PROCESS_TABLE+i*16+4]=READY;
+        endif;
+        i=i+1;
+    endwhile;
+
+//code end
+
+restore;
+SP = [PROCESS_TABLE + ( [SYSTEM_STATUS_TABLE + 1] * 16) + 13];
+ireturn;

@@ -1,0 +1,82 @@
+alias syscall R4;
+alias currentPID R3;
+
+breakpoint;
+currentPID = [SYSTEM_STATUS_TABLE + 1];
+
+// PTBR = PAGE_TABLE_BASE + 20*currentPID;
+//extract syscall from stack
+syscall = [[PTBR + 2 * (SP - 5) /512]* 512 + ((SP - 5) % 512)];
+
+
+alias userSP R0;
+userSP = SP;
+
+//change stack
+[PROCESS_TABLE + ( currentPID * 16) + 13] = SP;
+
+//setting the last address in kernal stack(since empty and stack grows downwards????)
+SP = [PROCESS_TABLE + (currentPID * 16) + 11] * 512 - 1;
+
+
+
+//Getpid
+if(syscall == 11)then
+    [PROCESS_TABLE + (currentPID * 16) + 9] = 11;
+    [[PTBR + 2 * (userSP - 1) /512]* 512 + ((userSP - 1) % 512)] = [SYSTEM_STATUS_TABLE + 1];
+    [PROCESS_TABLE + (currentPID * 16) + 9] = 0;
+endif;
+
+//Getppid
+if(syscall == 12)then
+    [PROCESS_TABLE + (currentPID * 16) + 9] = 12;
+    [[PTBR + 2 * (userSP - 1) /512]* 512 + ((userSP - 1) % 512)] = [PROCESS_TABLE + (currentPID * 16) + 2];
+    [PROCESS_TABLE + (currentPID * 16) + 9] = 0;
+endif;
+
+
+//Wait
+if(syscall == 13)then
+    [PROCESS_TABLE + (currentPID * 16) + 9] = 13;                               //mode flag set to syscall
+    alias waitPID R2;
+    waitPID = [[PTBR + 2 * (userSP - 4) /512]* 512 + ((userSP - 4) % 512)];
+
+    if(waitPID > 15 || waitPID < 1 || waitPID == currentPID || [PROCESS_TABLE + waitPID*16 + 4] == TERMINATED )then
+
+        [[PTBR + 2 * (userSP - 1) /512]* 512 + ((userSP - 1) % 512)] = -1;      //return value set to -1
+        [PROCESS_TABLE + (currentPID * 16) + 9] = 0;                            //mode flag reset
+        SP = [PROCESS_TABLE + ( currentPID * 16) + 13];                         //revert stack
+    endif;
+
+    [PROCESS_TABLE + ( currentPID * 16) + 4] = WAIT_PROCESS;
+    [PROCESS_TABLE + ( currentPID * 16) + 5] = waitPID;
+
+    multipush(R2,R3,R4,R0);
+    call SCHEDULER;
+    multipop(R2,R3,R4,R0);
+
+    [PROCESS_TABLE + (currentPID * 16) + 9] = 0;
+    [[PTBR + 2 * (userSP - 1) /512]* 512 + ((userSP - 1) % 512)] = 0;      //return value set to 0
+endif;
+
+//Signal
+if(syscall == 14)then
+    [PROCESS_TABLE + (currentPID * 16) + 9] = 13;        //mode flag set to syscall
+    R2 = 0;
+    while(R2 < 16)do
+        if([PROCESS_TABLE + (R2 * 16) + 4] == WAIT_PROCESS && [PROCESS_TABLE + (R2 * 16) + 5] == currentPID)then
+            [PROCESS_TABLE + (R2 * 16) + 4] = READY;
+            [PROCESS_TABLE + (R2 * 16) + 5] = -1;
+        endif;
+        R0 = R0 + 1;
+    endwhile;
+
+    [PROCESS_TABLE + (currentPID * 16) + 9] = 0;
+    [[PTBR + 2 * (userSP - 1) /512]* 512 + ((userSP - 1) % 512)] = 0;      //return value set to 0
+endif;
+
+
+//revert and return
+
+SP = [PROCESS_TABLE + ( currentPID * 16) + 13];
+ireturn;

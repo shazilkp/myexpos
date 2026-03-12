@@ -1,0 +1,91 @@
+//device manager
+
+alias functionNum R1;
+alias currentPID R2;
+
+//disk load
+if(functionNum == 2)then
+    alias pageNo R3;
+    alias blockNo R4;
+    multipush(R1,R2,R3,R4);
+
+    R1 = 3;     //function number of Acquire Disk in resource manager module
+    R2 = [SYSTEM_STATUS_TABLE + 1];
+
+    call MOD_0;
+
+    //ignore r0 return value
+
+    multipop(R1,R2,R3,R4);
+
+    [DISK_STATUS_TABLE + 1] = 0;    //load/store bit = load
+    [DISK_STATUS_TABLE + 2] = pageNo; //pagenumber set
+    [DISK_STATUS_TABLE + 3] = blockNo; //blocknumber set
+
+    load(pageNo,blockNo);
+
+    [PROCESS_TABLE + (16 * currentPID) + 4] = WAIT_DISK;
+
+    //terminal release
+    multipush(R1,R2,R3,R4);       //i dont wanna save whats in R3, or is it convention? like og program should get back whatever its sets?
+    call SCHEDULER;
+    multipop(R1,R2,R3,R4);
+
+    return;
+
+
+endif;
+
+if(functionNum == 3)then
+    multipush(R1,R2,R3);
+    R1 = 8;     //function number of terminal acquire in resource manager module
+    R2 = [SYSTEM_STATUS_TABLE + 1];
+
+    call MOD_0;
+
+    //ignore r0 return value
+
+    multipop(R1,R2,R3);
+
+    print(R3);
+
+    //terminal release
+    multipush(R1,R2);       //i dont wanna save whats in R3, or is it convention? like og program should get back whatever its sets?
+    R1 = 9;
+    R2 = [SYSTEM_STATUS_TABLE + 1];
+
+    call MOD_0;
+    multipop(R1,R2);
+
+    return;
+
+
+endif;
+
+if(functionNum == 4)then
+    multipush(R1,R2,R3);
+    R1 = 8;     //function number of terminal acquire in resource manager module
+    R2 = currentPID;
+
+    call MOD_0;
+
+    //ignore r0 return value
+
+    multipop(R1,R2,R3);
+
+    read;
+
+
+    // we dont release the terminal like we have done for write, we call read andd set as wait_terminal and call schedular, this gets
+    // reinvoked when the console interrupt tiggers
+
+    [PROCESS_TABLE + 16*currentPID + 4] = WAIT_TERMINAL;
+    multipush(R1,R2,R3);
+
+    call SCHEDULER;
+
+    multipop(R1,R2,R3);
+
+    [[PAGE_TABLE_BASE + 20*currentPID +2*(R3/512)]*512 + (R3%512)]=[PROCESS_TABLE+ 16*currentPID + 8];
+    return;
+endif;

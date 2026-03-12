@@ -1,0 +1,182 @@
+//interrupt handler for fork sys call
+
+
+
+//SETTIG THE modE FLAG field of process table to 8(word 9)
+[PROCESS_TABLE + ([SYSTEM_STATUS_TABLE + 1] * 16) + 9] = 8;
+
+alias userSP R1;
+userSP = SP;
+
+//storing the user stack pointer into usptr(13th word) of the process tav-ble entry accessed using pid
+//from the system status table
+[PROCESS_TABLE + ( [SYSTEM_STATUS_TABLE + 1] * 16) + 13] = SP;
+
+//setting the last address in kernal stack(since empty and stack grows downwards????)
+SP = [PROCESS_TABLE + ([SYSTEM_STATUS_TABLE + 1] * 16) + 11] * 512 - 1;
+//PTBR IS PARENT BASE TABLE
+// PTBR=[PROCESS_TABLE + ( [SYSTEM_STATUS_TABLE + 1] * 16) + 14];
+
+alias parentPID R7;
+parentPID = [SYSTEM_STATUS_TABLE + 1];
+
+alias childPID R6;
+multipush(R1,R7,PTBR);
+    R1 = GET_PCB_ENTRY;                 //get get_pcb_entry
+    call PROCESS_MANAGER;
+
+    childPID = R0;
+multipop(R1,R7,PTBR);
+
+if(childPID == -1)then
+    [[PTBR + 2 * (userSP-1) / 512]* 512 + (userSP - 1) % 512] = -1;     //set -1 in stack
+    [PROCESS_TABLE + ([SYSTEM_STATUS_TABLE + 1] * 16) + 9] = 0;         //reset mode flag
+    SP = userSP;                                                        //reset stack
+    ireturn;                                                            //return to user process calling fork
+endif;
+
+//if heap not allocated for parent process
+if([PTBR + 4] == -1)then      
+    multipush(R0, R1, R6,R7,PTBR);
+
+            R1 = 1;         // get Free Page
+            call MEMORY_MANAGER;
+
+            [PTBR + 4] = R0;
+            [PTBR + 5] = "1110";
+
+            R1 = 1;
+            call MEMORY_MANAGER;
+
+            [PTBR + 6] = R0;
+            [PTBR + 7] = "1110";
+
+    multipop(R0, R1, R6,R7,PTBR);
+endif;
+
+
+
+
+alias stk1 R3;
+alias stk2 R4;
+
+
+
+//get two pages for new stack and 1 new page for new user area page
+multipush(R0, R1,R6,R7,PTBR);
+
+        R1 = 1;         // get Free Page
+        call MEMORY_MANAGER;
+        R3 = R0;
+
+        R1 = 1;
+        call MEMORY_MANAGER;
+        R4 = R0;
+
+        R1 = 1;
+        call MEMORY_MANAGER;
+       
+        [PROCESS_TABLE + childPID*16 + 11] = R0;
+        
+
+multipop(R0, R1,R6,R7,PTBR);
+
+
+
+
+[PROCESS_TABLE + 16 * childPID + (3)]  = [PROCESS_TABLE + 16 * parentPID + (3)];            //USERID
+[PROCESS_TABLE + 16 * childPID + (6)]  = [PROCESS_TABLE + 16 * parentPID + (6)];            //SWAP FLAG
+[PROCESS_TABLE + 16 * childPID + (7)]  = [PROCESS_TABLE + 16 * parentPID + (7)];            //INODE INDEX
+[PROCESS_TABLE + 16 * childPID + (10)] = [PROCESS_TABLE + 16 * parentPID + (10)];           //USER AREA SWAP STATUS
+[PROCESS_TABLE + 16 * childPID + (13)] = [PROCESS_TABLE + 16 * parentPID + (13)];           //USER STACK POINTER (UPTR)
+
+
+[PROCESS_TABLE + 16 * childPID + (9)]  = 0;      //MODE FLAG
+[PROCESS_TABLE + 16 * childPID + (0)]  = 0;      //TICK
+[PROCESS_TABLE + 16 * childPID + (12)] = 0;      //KERNEL STACK POINTER (KPTR)
+
+[PROCESS_TABLE + 16 * childPID + (2)]  = parentPID;      //PPID
+[PROCESS_TABLE + 16 * childPID + (4)]  = CREATED;        //STATE
+// [PROCESS_TABLE + 16 * childPID + (11)] = [PROCESS_TABLE + childPID*16 + 11];           //USER AREA PAGE NUMBER
+
+
+
+//copy per process resource table
+alias i R0;
+//copy the last 16 words(8 entries) of the [PROCESS_TABLE + childPID*16 + 11](as the per process resource table)
+i = 1;
+while(i < 17) do
+    [(([PROCESS_TABLE + childPID*16 + 11] + 1)* 512) - (i) ] = [(( [PROCESS_TABLE + 16 * parentPID + (11)] + 1)* 512) - (i) ];
+    i = i +1;
+endwhile;
+
+//copy per process disk map table
+i = 0;
+while(i < 16)do
+    [DISK_MAP_TABLE + 10 * (childPID) + i] = [DISK_MAP_TABLE + 10 * (parentPID) + i];
+    i = i + 1; 
+endwhile;
+
+//initialise page table
+
+//LIBRARY , HEAP 
+i = 0;
+while(i < 8)do
+    [[PROCESS_TABLE + 16 * childPID + 14] + (i)] = [PTBR + (i)];
+    if(i % 2 == 0 )then
+        [MEMORY_FREE_LIST + [PTBR + (i)]] = [MEMORY_FREE_LIST + [PTBR + (i)]] + 1;          //since one more process sharing the pahge , increment count
+    endif;    
+    i = i + 1;
+endwhile;
+
+//code copy
+i = 8;
+while(i < 16)do
+    [[PROCESS_TABLE + 16 * childPID + 14] + (i)] = [PTBR + (i)];
+    if(i % 2 == 0 )then
+        [MEMORY_FREE_LIST + [PTBR + (i)]] = [MEMORY_FREE_LIST + [PTBR + (i)]] + 1;          //since one more process sharing the pahge , increment count
+    endif;    
+    i = i + 1;
+endwhile;
+
+//STACK
+[[PROCESS_TABLE + 16 * childPID + 14] + (16)]  = stk1;
+[[PROCESS_TABLE + 16 * childPID + 14] + (17)]  = [PTBR + (17)];
+[[PROCESS_TABLE + 16 * childPID + 14] + (18)] = stk2;
+[[PROCESS_TABLE + 16 * childPID + 14] + (19)] = [PTBR + (19)];
+
+
+//copy content of stack
+i = 0;
+while(i < 512)do
+    [stk1 * 512 + i] = [[PTBR + 16] * 512 + i];
+    [stk2 * 512 + i] = [[PTBR + 18] * 512 + i];
+    i = i + 1;
+endwhile;
+
+
+//bp stored to top of kernal stack of child process
+[[PROCESS_TABLE + childPID*16 + 11] * 512] = BP;
+// [PROCESS_TABLE + 16 * childPID + (12)] = [PROCESS_TABLE + 16 * childPID + (12)] + 1;      //KERNEL STACK POINTER (KPTR)
+
+
+//setup return values
+//both parentSP and childSP same atp
+
+//child stack
+//child_ptbr + addr+translations
+[([[PROCESS_TABLE + 16 * childPID + 14] + 2 * (userSP - 1)/512] * 512) + (userSP - 1)%512] = 0;
+
+
+//parent stack
+[([PTBR + 2 * (userSP - 1)/512] * 512 ) + (userSP - 1)% 512] = childPID;
+
+
+// breakpoint;
+//reseting mode flag of parent
+[PROCESS_TABLE + (parentPID * 16) + 9] = 0;
+
+//change sp to userSP
+SP = userSP;
+
+ireturn;

@@ -1,0 +1,136 @@
+//Mode flag
+[PROCESS_TABLE+[SYSTEM_STATUS_TABLE+1]*16+9]=8;
+
+//switch to kernel mode
+alias userSP R2;
+userSP = SP;
+[PROCESS_TABLE + ([SYSTEM_STATUS_TABLE +1] * 16) +13] =userSP;
+SP = [PROCESS_TABLE + ([SYSTEM_STATUS_TABLE+1] * 16) + 11]* 512 -1;
+
+//Get PCB entry from memory manager module
+R1=GET_PCB_ENTRY;
+multipush(R2);
+call PROCESS_MANAGER; //Process Manager
+multipop(R2);
+
+//returns index of child
+alias childPID R3;
+R3=R0;
+
+//Get Pcb Entry returns -1
+if(childPID==-1) then
+    //store -1 as the return value in the stack,
+    R1 = userSP -1; //user stack address to be written into(virtual address)
+    [[PAGE_TABLE_BASE + 20*[SYSTEM_STATUS_TABLE+1] + (R1/512)*2]*512 + (R1%512)] = -1;
+    // reset the MODE FLAG (to 0), 
+    [PROCESS_TABLE+[SYSTEM_STATUS_TABLE+1]*16+9]=0;
+    //switch to user stack and 
+    SP=userSP;
+    //return to the user mode from the fork system call
+    ireturn;
+endif;
+
+//if heap pages not allocated
+if([PAGE_TABLE_BASE + 20*[SYSTEM_STATUS_TABLE+1] + 4] == -1) then
+    multipush(R0,R1,R2,R3);
+    R1=1;
+    call MOD_2; //Get free pg fn of MEMORY MANAGER MOD
+    [PAGE_TABLE_BASE+[SYSTEM_STATUS_TABLE+1]*20+4]=R0;
+    [PAGE_TABLE_BASE+[SYSTEM_STATUS_TABLE+1]*20+5]="1110";
+    R1=1;
+    call MOD_2; //Get free pg fn of MEMORY MANAGER MOD
+    [PAGE_TABLE_BASE+[SYSTEM_STATUS_TABLE+1]*20+6]=R0;
+    [PAGE_TABLE_BASE+[SYSTEM_STATUS_TABLE+1]*20+7]="1110";
+    multipop(R0,R1,R2,R3);
+endif;
+
+///Allocate stack pages for the child process
+multipush(R0,R1,R2);
+multipush(R3);
+R1=1;
+call MOD_2; //Get free pg fn of MEMORY MANAGER MOD
+multipop(R3);
+[PAGE_TABLE_BASE+childPID*20+16]=R0;
+[PAGE_TABLE_BASE+childPID*20+17]=[PAGE_TABLE_BASE + [SYSTEM_STATUS_TABLE+1]*20 + 17];
+multipush(R3);
+R1=1;
+call MOD_2; //Get free pg fn of MEMORY MANAGER MOD
+multipop(R3);
+[PAGE_TABLE_BASE+childPID*20+18]=R0;
+[PAGE_TABLE_BASE+childPID*20+19]=[PAGE_TABLE_BASE + [SYSTEM_STATUS_TABLE+1]*20 + 19];
+
+///Allocate a user area page for the child
+multipush(R3);
+R1=1;
+call MOD_2; //Get free pg fn of MEMORY MANAGER MOD
+multipop(R3);
+[PROCESS_TABLE+ childPID*16 + 11]=R0;//USER AREA PG NO
+multipop(R0,R1,R2);
+
+///PROCESS_TABLE of child
+[PROCESS_TABLE + childPID*16 + 0] = 0; //tick
+[PROCESS_TABLE + childPID*16 + 2] = [SYSTEM_STATUS_TABLE+1]; //PPID
+[PROCESS_TABLE + childPID*16 + 3] = [PROCESS_TABLE + ([SYSTEM_STATUS_TABLE +1] * 16) + 3]; //userid
+[PROCESS_TABLE + childPID*16 + 4] = CREATED;//state
+[PROCESS_TABLE + childPID*16 + 6] = [PROCESS_TABLE + ([SYSTEM_STATUS_TABLE +1] * 16) + 6]; //swap flag
+[PROCESS_TABLE + childPID*16 + 7] = [PROCESS_TABLE + ([SYSTEM_STATUS_TABLE +1] * 16) + 7]; //inode index
+[PROCESS_TABLE + childPID*16 + 9] = 0; //mode flag
+[PROCESS_TABLE + childPID*16 + 10] = [PROCESS_TABLE + ([SYSTEM_STATUS_TABLE +1] * 16) + 10]; //user area swap status
+[PROCESS_TABLE + childPID*16 + 12] = 0; //kptr
+[PROCESS_TABLE + childPID*16 + 13] = [PROCESS_TABLE + ([SYSTEM_STATUS_TABLE +1] * 16) + 13]; //uptr
+//pid, ptbr and ptlr initialized in the getpcb function already
+
+///PER PROCESS RESOURCE TABLE
+
+
+///PER PROCESS DISK MAP TABLE
+R4=0;
+while(R4<16) do
+    [DISK_MAP_TABLE + childPID*16 + R4] = [DISK_MAP_TABLE + ([SYSTEM_STATUS_TABLE +1] * 16) + R4];
+    R4=R4+1;
+endwhile;
+
+///PAGE TABLE
+R4=0;
+while(R4<16) do
+    [PAGE_TABLE_BASE+childPID*20 + R4]=[PAGE_TABLE_BASE+[SYSTEM_STATUS_TABLE+1]*20 + R4];
+    if(R4%2==0) then
+        [MEMORY_FREE_LIST+[PAGE_TABLE_BASE+childPID*20 + R4]]=[MEMORY_FREE_LIST+[PAGE_TABLE_BASE+childPID*20 + R4]]+1;
+    endif;
+    R4=R4+1;
+endwhile;
+
+///Copy user stack pages word by word
+R4=0;
+alias cst R5;
+alias pst R6;
+R5=[PAGE_TABLE_BASE+childPID*20+16]*512;
+R6=[PAGE_TABLE_BASE+[SYSTEM_STATUS_TABLE+1]*20 + 16]*512;
+while(R4<512) do
+    [R5+R4]=[R6+R4];
+    R4=R4+1;
+endwhile;
+R4=0;
+R5=[PAGE_TABLE_BASE+childPID*20+18]*512;
+R6=[PAGE_TABLE_BASE+[SYSTEM_STATUS_TABLE+1]*20 + 18]*512;
+while(R4<512) do
+    [R5+R4]=[R6+R4];
+    R4=R4+1;
+endwhile;
+
+//Store the current BP value to the begining of the kernel stack.
+[[PROCESS_TABLE+ childPID*16 + 11]*512]=BP;
+
+//Return values
+R1 = userSP -1;
+[[PAGE_TABLE_BASE + 20*[SYSTEM_STATUS_TABLE+1] + (R1/512)*2]*512 + (R1%512) ]= childPID;//parent
+[[PAGE_TABLE_BASE + 20*childPID + (R1/512)*2]*512 + (R1%512) ]= 0;//child
+
+//Mode flag
+[PROCESS_TABLE+[SYSTEM_STATUS_TABLE+1]*16+9]=0;
+
+//switch to user stack
+SP=userSP;
+
+
+ireturn;

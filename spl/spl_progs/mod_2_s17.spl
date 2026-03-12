@@ -1,0 +1,69 @@
+//memmory manager module
+
+alias functionNum R1;
+
+
+
+//get free page
+if(functionNum == 1)  then
+
+
+    //increment the WAIT_MEM_COUNT
+    [SYSTEM_STATUS_TABLE + 3] = [SYSTEM_STATUS_TABLE + 3] + 1;
+
+    //while memory is full ie wait for memory
+    while([SYSTEM_STATUS_TABLE + 3] == 0)do
+        [PROCESS_TABLE + 16 * ([SYSTEM_STATUS_TABLE + 1]) + 4] = WAIT_MEM;
+
+        multipush(R1);
+        call SCHEDULER;
+        multipop(R1);
+
+    endwhile;
+
+
+    //decrement WAIT_MEM_COUNT
+    [SYSTEM_STATUS_TABLE + 3] = [SYSTEM_STATUS_TABLE + 3] - 1;
+
+    alias memoryFreeIndex R2;
+    // since available pages for user processes are from 76 to 127
+    memoryFreeIndex = 76;
+
+    while (([MEMORY_FREE_LIST + memoryFreeIndex] > 0) && (memoryFreeIndex < 128)) do
+        memoryFreeIndex = memoryFreeIndex + 1;
+    endwhile;
+
+    [MEMORY_FREE_LIST + memoryFreeIndex] = 1;
+
+    R0 = memoryFreeIndex;
+
+    // breakpoint;
+    return;
+endif;
+
+//release page
+if(functionNum == 2) then
+    alias pageNum R2;
+    [MEMORY_FREE_LIST + pageNum] = [MEMORY_FREE_LIST + pageNum] - 1;
+    
+
+    if([MEMORY_FREE_LIST + pageNum] == 0) then
+        //increment free mem count
+        [SYSTEM_STATUS_TABLE + 2] = [SYSTEM_STATUS_TABLE + 2] + 1;
+    endif;
+
+    alias i R3;
+    R3 = 1;
+
+    
+    while(i < 16)do
+        if([PROCESS_TABLE + 16 * i + 4] == WAIT_MEM)then
+            [PROCESS_TABLE + 16 * i + 4] = READY;
+        endif;
+        i = i + 1;
+    endwhile;
+
+    // breakpoint;
+    return;
+
+endif;

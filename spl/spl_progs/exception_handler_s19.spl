@@ -1,0 +1,110 @@
+breakpoint;
+//mode flag set to -1 indication execption
+[PROCESS_TABLE + ( [SYSTEM_STATUS_TABLE + 1] * 16) + 9] = -1;
+//storing the user stack pointer into usptr(13th word) of the process tav-ble entry accessed using pid
+//from the system status table
+[PROCESS_TABLE + ( [SYSTEM_STATUS_TABLE + 1] * 16) + 13] = SP;
+alias  userSP R1;
+userSP = SP;
+//setting the last address in kernal stack(since empty )
+SP = [PROCESS_TABLE + ([SYSTEM_STATUS_TABLE + 1] * 16) + 11] * 512 - 1;
+backup;
+
+multipush(EIP);
+
+//interrupt handler code
+if(EC != 0) then
+
+    if (EC == 1) then
+        print "1-Ill Inst";
+
+        print(EIP);
+        // breakpoint;
+    endif;
+    if (EC == 2) then
+        print "2-Ill Mem acc at ";
+        print(EIP);
+        // breakpoint;
+    endif;
+    if (EC == 3) then
+        print "3-Ari Exc";
+    endif;
+
+    multipush(R0,R1);
+
+    R1 = 3;                         // exit process
+    R2 = [SYSTEM_STATUS_TABLE + 1];
+    call PROCESS_MANAGER;
+    call SCHEDULER;
+
+    multipop(R0,R1);
+
+else
+
+    if((userSP == (PTLR * 512) - 1)) then
+
+        print "0-PF";
+
+    else
+
+        alias blockNo R2;
+
+        if(EPN > 3 && EPN < 8) then         // code page
+
+            blockNo = [DISK_MAP_TABLE + [SYSTEM_STATUS_TABLE + 1]*10 + EPN];
+
+            multipush(R0, R1, R2);
+            multipush(EPN);
+
+            R1 = 5;             // Get Code Page
+            R2 = blockNo;
+            call MEMORY_MANAGER;
+
+            multipop(EPN);
+
+            [PAGE_TABLE_BASE + 20 * [SYSTEM_STATUS_TABLE + 1] + EPN*2] = R0;
+            [PAGE_TABLE_BASE + 20 * [SYSTEM_STATUS_TABLE + 1] + EPN*2 + 1] = "1100";
+
+            multipop(R0, R1, R2);
+
+        else
+
+            // heap page
+            multipush(R0, R1, R2);
+
+            R1 = 1;         // get Free Page
+            call MEMORY_MANAGER;
+
+            [PAGE_TABLE_BASE + 20 * [SYSTEM_STATUS_TABLE + 1] + 4] = R0;
+            [PAGE_TABLE_BASE + 20 * [SYSTEM_STATUS_TABLE + 1] + 5] = "1110";
+
+            R1 = 1;
+            call MEMORY_MANAGER;
+
+            [PAGE_TABLE_BASE + 20 * [SYSTEM_STATUS_TABLE + 1] + 6] = R0;
+            [PAGE_TABLE_BASE + 20 * [SYSTEM_STATUS_TABLE + 1] + 7] = "1110";
+
+            multipop(R0, R1, R2);
+
+        endif;
+
+    endif;
+
+endif;
+
+
+
+
+//code end
+
+//mode flag set to 0
+[PROCESS_TABLE + ( [SYSTEM_STATUS_TABLE + 1] * 16) + 9] = 0;
+multipop(EIP);
+
+restore;
+SP = [PROCESS_TABLE + ( [SYSTEM_STATUS_TABLE + 1] * 16) + 13];
+SP = SP + 1;
+
+//sp is user sp so we do address transl and store the eip in stack to be re executed
+[[PTBR + 2 * (SP/512)] * 512 + (SP%512)] = EIP;
+ireturn;

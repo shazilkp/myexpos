@@ -1,0 +1,29 @@
+//load the init program
+loadi(65,7);
+loadi(66,8);
+
+//load int 10 handler
+loadi(22,35);
+loadi(23,36);
+
+//loading exception handler
+loadi(2, 15);
+loadi(3, 16);
+
+
+PTBR = PAGE_TABLE_BASE;
+PTLR = 9;
+
+[PTBR+8] = 65;  // Logical page 4 
+[PTBR+9] = "0100";
+[PTBR+10] = 66;  // Logical page 5 
+[PTBR+11] = "0100"; 
+[PTBR+16] = 76;  // Logical page 8 
+[PTBR+17] = "0110";
+
+//top of stack set to code starting(logical page 4)
+[76*512] = 2048;        
+SP = 8*512; //Logical Page 8 set as stack pointer
+
+//Return
+ireturn;

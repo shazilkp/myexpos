@@ -1,0 +1,16 @@
+//storing the user stack pointer into usptr(13th word) of the process tav-ble entry accessed using pid
+//from the system status table
+[PROCESS_TABLE + ( [SYSTEM_STATUS_TABLE + 1] * 16) + 13] = SP;
+
+//setting the last address in kernal stack(since empty and stack grows downwards????)
+SP = [PROCESS_TABLE + ([SYSTEM_STATUS_TABLE + 1] * 16) + 11] * 512 - 1;
+backup;
+
+//interrupt handler code
+print "TIMER";
+print [SYSTEM_STATUS_TABLE + 1];
+//code end
+
+restore;
+SP = [PROCESS_TABLE + ( [SYSTEM_STATUS_TABLE + 1] * 16) + 13];
+ireturn;

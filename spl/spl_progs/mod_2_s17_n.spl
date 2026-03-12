@@ -1,0 +1,62 @@
+//Memory Manager Module
+//1. According to the function number value present in R1, implement different functions in module 2.
+alias fnno R1;
+
+//2. If the function number corresponds to Get Free Page, follow steps below
+//GET FREE PAGE -- fnno:1
+if(fnno==1) then 
+        //i) Increment WAIT_MEM_COUNT field in the system status table. //Do not increment the WAIT_MEM_COUNT in busy loop (an important step )
+    [SYSTEM_STATUS_TABLE+3]=[SYSTEM_STATUS_TABLE+3]+1;
+        
+        //ii) While memory is full (MEM_FREE_COUNT will be 0), do following.
+        //    Set the state of the invoked process as WAIT_MEM.
+        //    Schedule other process by invoking the context switch module. // blocking the process
+    while([SYSTEM_STATUS_TABLE+2]==0) do
+        [PROCESS_TABLE+16*[SYSTEM_STATUS_TABLE+1]+4]=WAIT_MEM;
+        multipush(R1);
+        call SCHEDULER;//scheduler
+        multipop(R1);
+    endwhile;
+        
+        //iii) Decrement the WAIT_MEM_COUNT field and MEM_FREE_COUNT field in the system status table.
+        /// /* Note the sequence - increment WAIT_MEM_COUNT, waiting for the memory, decrement WAIT_MEM_COUNT.*/
+    [SYSTEM_STATUS_TABLE+3]=[SYSTEM_STATUS_TABLE+3]-1;
+    [SYSTEM_STATUS_TABLE+2]=[SYSTEM_STATUS_TABLE+2]-1;
+
+        //iv) Find a free page using memory free list and set the corresponding entry as 1. Make sure to store the obtained free page number in R0 as return value.
+    R2=57*512;
+    while([R2]!=0) do
+        R2=R2+1;
+    endwhile;
+    [R2]=1;
+    R0=R2-57*512; //page no of the free page
+
+        //v) Return to the caller
+    breakpoint;
+    return;
+endif;
+
+//If the function number corresponds to Release Page, follow steps below
+//RELEASE PAGE -- fnno=2
+if(fnno==2) then
+    //i) The Page number to be released is present in R2. Decrement the corresponding entry in the memory free list.
+    alias pgno R2;
+    [57*512+pgno]=[57*512 + pgno]-1;
+    //ii) If that entry in the memory free list becomes zero, then the page is free. So increment the MEM_FREE_COUNT in the system status table.
+    if([57*512+pgno]==0) then
+        [SYSTEM_STATUS_TABLE+2]=[SYSTEM_STATUS_TABLE+2]+1;
+    endif;
+    //iii) Update the STATUS to READY for all processes (with valid PID) which have STATUS as WAIT_MEM.
+    R3=1;
+    while(R3<16) do
+        if([PROCESS_TABLE+R3*16+4]  == WAIT_MEM) then
+            [PROCESS_TABLE+R3*16+4] = READY;
+        endif;
+        R3=R3+1;
+    endwhile;
+    //iv)  Return to the caller
+    breakpoint;
+    return;
+endif;
+
+return;

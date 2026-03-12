@@ -1,0 +1,82 @@
+//EXCEPTION HANDLER
+//Mode flag
+breakpoint;
+[PROCESS_TABLE+[SYSTEM_STATUS_TABLE+1]*16+9]=-1;
+
+// Switch to the kernel stack and backup the register context and push EIP onto the stack
+//SP
+[PROCESS_TABLE + ([SYSTEM_STATUS_TABLE +1] * 16) +13] =SP;
+if(SP==PTLR*512-1)  then
+    print "fullSP";
+    R1=3;
+    R2=[SYSTEM_STATUS_TABLE+1];
+    call PROCESS_MANAGER; //Exit process fn in PROCESS MANAGER
+    halt;
+endif;
+//USER TO KERNEL STACK
+SP = [PROCESS_TABLE + ([SYSTEM_STATUS_TABLE+1] * 16) + 11]* 512 -1;
+backup;
+multipush(EIP);
+
+//3) If the cause of the exception is other than page fault (EC is not equal to 0) or if the user stack is full (when userSP is PTLR*512-1, the return address can't be pushed onto the stack), then print a meaningful error message. Then invoke the Exit Process function to halt the process and invoke the scheduler. 
+if(EC!=0)   then
+    multipop(EIP);
+    restore; //unnecessary
+    print "ERROR1";
+    R1=3;
+    R2=[SYSTEM_STATUS_TABLE+1];
+    call PROCESS_MANAGER; //Exit process fn in PROCESS MANAGER
+    halt;
+endif;
+
+
+//4) If page fault is caused due to a code page, 
+//then get the code block number to be loaded from the disk map table. 
+//For this block, invoke the Get Code Page function present in the memory manager module. 
+//Update the page table entry for this code page,
+// set the page number to memory page obtained from Get Code Page function and 
+//auxiliary information to "1100".
+if(EPN >=4 && EPN<8) then //code
+    multipush(R0,R1,R2,R3);
+    R2=[DISK_MAP_TABLE+[SYSTEM_STATUS_TABLE+1]*10+EPN];
+    R1=5;
+    call MEMORY_MANAGER; //Get code pg fn from Memory manager
+    [PAGE_TABLE_BASE+[SYSTEM_STATUS_TABLE+1]*20+(EPN)*2+0]=R0;
+    [PAGE_TABLE_BASE+[SYSTEM_STATUS_TABLE+1]*20+(EPN)*2+1]="1100";
+    multipop(R0,R1,R2,R3);
+
+//5)If page fault is caused due to a heap page, 
+//then invoke the Get Free Page function of the memory manager module 
+//twice to allocate two memory pages for the heap. 
+//Update the page table entry for these heap pages, 
+//set the page numbers to the memory pages obtained from Get Free Page function and 
+//set auxiliary information to "1110".
+else
+    multipush(R0,R1,R2,R3);
+    R1=1;
+    call MEMORY_MANAGER; //Get free pg fn of MEMORY MANAGER MOD
+    [PAGE_TABLE_BASE+[SYSTEM_STATUS_TABLE+1]*20+4]=R0;
+    [PAGE_TABLE_BASE+[SYSTEM_STATUS_TABLE+1]*20+5]="1110";
+    R1=1;
+    call MEMORY_MANAGER; //Get free pg fn of MEMORY MANAGER MOD
+    [PAGE_TABLE_BASE+[SYSTEM_STATUS_TABLE+1]*20+6]=R0;
+    [PAGE_TABLE_BASE+[SYSTEM_STATUS_TABLE+1]*20+7]="1110";
+    multipop(R0,R1,R2,R3);
+endif;
+
+//6) Reset the MODE FLAG to 0. 
+//Pop EIP from the stack and 
+//restore the register context.
+[PROCESS_TABLE+[SYSTEM_STATUS_TABLE+1]*16+9]=0;
+multipop(EIP);
+restore;
+
+//7) Change to the user stack. 
+//Increment the stack pointer, 
+//store the EIP value onto the location pointed to by SP and 
+//return to the user mode. 
+//(Address translations needs to be done on the SP to find the stack address to which EIP is to be stored)
+SP=[PROCESS_TABLE + ([SYSTEM_STATUS_TABLE +1] * 16) +13];
+SP=SP+1;
+[[PAGE_TABLE_BASE+20*[SYSTEM_STATUS_TABLE+1]+2*(SP/512)]*512 + SP%512]=EIP;
+ireturn;

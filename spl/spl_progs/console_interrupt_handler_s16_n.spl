@@ -1,0 +1,23 @@
+//SP
+[PROCESS_TABLE + ([SYSTEM_STATUS_TABLE +1] * 16) +13] =SP;
+//USER TO KERNEL STACK
+SP = [PROCESS_TABLE + ([SYSTEM_STATUS_TABLE+1] * 16) + 11]* 512 -1;
+backup;
+
+//get process id of process that had acquired terminal
+alias reqPID R0;
+reqPID = [TERMINAL_STATUS_TABLE + 1];
+[PROCESS_TABLE + reqPID*16 + 8]=P0;
+
+//CALL Release terminal
+multipush(R0);
+R1=9;
+R2=reqPID;
+call MOD_0;
+multipop(R1);
+
+restore;
+
+//kernel to user stack before exit
+SP = [PROCESS_TABLE + [SYSTEM_STATUS_TABLE+1]*16 + 13];
+ireturn;

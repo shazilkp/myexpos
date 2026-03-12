@@ -1,0 +1,153 @@
+//process manager module
+
+alias functionNum R1;
+alias currentPID R2;
+
+
+//get_pcb_entry
+if(functionNum == 1)  then
+    alias PID R0;
+    PID = 0;
+    while(PID < 16)do
+        if([PROCESS_TABLE + 16 * PID + 4] == TERMINATED)then
+            break;
+        endif;
+        PID = PID + 1;
+    endwhile;
+
+    if(PID > 15)then
+        PID = -1;
+        return;
+    endif;
+
+    [PROCESS_TABLE + 16 * PID + (1)]  = PID;                                //PID
+    [PROCESS_TABLE + 16 * PID + (4)]  = ALLOCATED;                          //STATE
+    [PROCESS_TABLE + 16 * PID + (14)] = PAGE_TABLE_BASE + 20 * PID;         //PTBR
+    [PROCESS_TABLE + 16 * PID + (15)] = 10;                                 //PTLR
+    return;
+endif;
+
+//free user area page
+if(functionNum == 2)  then
+    alias UAPN R4;
+    multipush(R0,R1,R2,R3,R4);
+    UAPN = [PROCESS_TABLE + currentPID*16 + 11];
+    R1 = 2;     //release page
+    R2 = UAPN;
+
+    call MEMORY_MANAGER;     //memory manager module
+    multipop(R0,R1,R2,R3,R4);
+    return;
+endif;
+
+//exit process
+if(functionNum == 3)then
+    //if not in exec syscall
+    if([PROCESS_TABLE + (16 * currentPID) + 9] != 9)then
+        alias i R0;
+        i = 0; 
+        while(i < 16)do
+            if([PROCESS_TABLE + (i * 16) + 4] == WAIT_PROCESS && [PROCESS_TABLE + (i * 16) + 5] == currentPID)then
+                [PROCESS_TABLE + (i * 16) + 4] = READY;
+                [PROCESS_TABLE + (i * 16) + 5] = -1;
+                if([PROCESS_TABLE + (i * 16) + 2] == currentPID)then
+                    [PROCESS_TABLE + (i * 16) + 2] = -1;
+                endif;
+            endif;
+            i = i + 1;
+        endwhile;
+    endif;
+    
+    multipush(R1,R2);
+    //FREE PAGE TABLE
+    R1 = 4;
+   
+
+    call PROCESS_MANAGER;
+
+    //free user area page
+    R1 = 2;
+   
+
+    call PROCESS_MANAGER;
+    multipop(R1,R2);
+
+
+    [PROCESS_TABLE + currentPID*16 + 4] = TERMINATED;
+    return;
+endif;
+
+//free page table
+if(functionNum == 4)then
+    //INVALIDATING LIBRARY PAGES ENTRIES
+    [PTBR + 0] = -1;
+    [PTBR + 1] = "0000";
+    [PTBR + 2] = -1;
+    [PTBR + 3] = "0000";
+
+    //for each page table enrty  call release page mem manager function 2
+    alias pageNum R3;
+    alias  i R4;
+    i = 4;
+    while(i < 2*PTLR)do
+        if([PTBR + i] != -1)then
+            pageNum = [PTBR + i];
+            multipush(R0,R1,R2,R3,R4);
+            
+
+            //release page
+            R1 = 2;
+            R2 = pageNum;
+            call MEMORY_MANAGER;     //mem manager module
+
+
+            multipop(R0,R1,R2,R3,R4);
+
+            [PTBR + i] = -1;
+            [PTBR + i + 1] = "0000";
+        endif;
+        i = i + 2;
+    endwhile;
+
+    //Go through the heap and stack entries in the disk map table
+    //call Release Block(fn=4) mod_2 for any valid entry
+
+    //heap
+    i = 2;
+    while(i < 4)do
+        if([DISK_MAP_TABLE + 10 * currentPID + i] != -1)then
+            multipush(R0,R1,R2,R3,R4);
+            R1 = 4;                                         //fno = 4 (Release Block)
+            R2 = [DISK_MAP_TABLE + 10 * currentPID + i];    //the block correspoding to heap in disk
+            call MEMORY_MANAGER;
+            multipop(R0,R1,R2,R3,R4);
+        endif;
+        i = i+1;
+    endwhile;
+
+    //stack
+    i = 8;
+    while(i < 10)do
+        if([DISK_MAP_TABLE + 10 * currentPID + i] != -1)then
+            multipush(R0,R1,R2,R3,R4);
+            R1 = 4;                                         //fno = 4 (Release Block)
+            R2 = [DISK_MAP_TABLE + 10 * currentPID + i];    //the block correspoding to stack in disk
+            call MEMORY_MANAGER;
+            multipop(R0,R1,R2,R3,R4);
+        endif;
+        i = i +1;
+    endwhile;
+
+    //invalidating all entries of disk map table
+    i = 2;
+    while(i < 10)do
+        [DISK_MAP_TABLE + 10 * currentPID + i] = -1;
+        i = i + 1;
+    endwhile;
+
+    return;
+
+endif;
+
+
+

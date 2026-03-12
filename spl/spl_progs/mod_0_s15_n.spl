@@ -1,0 +1,38 @@
+//Terminal Handling
+//F8 : Acquire Terminal
+
+alias fnno  R1;
+alias currentPID R2;
+
+if(fnno == 8) then
+	//busy wait
+	while([TERMINAL_STATUS_TABLE] == 1) do
+		[PROCESS_TABLE  + currentPID*16 + 4]=WAIT_TERMINAL;
+		multipush(R1,R2);
+		call  MOD_5;//scheduler
+		multipop(R1,R2);
+	endwhile;
+	[TERMINAL_STATUS_TABLE]= 1;
+	[TERMINAL_STATUS_TABLE+1] = currentPID;
+	breakpoint;
+	return;
+endif;
+//F8 : Release Terminal
+if(fnno == 9) then
+	if(currentPID!=[TERMINAL_STATUS_TABLE+1]) then
+		R0=-1;
+		return;
+	endif;
+	[TERMINAL_STATUS_TABLE] =0;
+	R3=1;
+	while(R3<16) do
+		if([PROCESS_TABLE  + R3*16 + 4]==WAIT_TERMINAL)then
+			[PROCESS_TABLE  + R3*16 + 4] = READY;
+		endif;
+		R3=R3+1;
+	endwhile;
+	R0=0;
+	breakpoint;
+	return;
+endif;
+return;

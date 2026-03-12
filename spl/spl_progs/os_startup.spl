@@ -1,0 +1,30 @@
+//load init from 7-8 block to pages 65,66
+
+loadi(65,7);    
+loadi(66,8);
+
+//load the int10 module
+loadi(22,35);
+loadi(23,36);
+
+// load the expection handlr
+loadi(2, 15);
+loadi(3, 16);
+
+PTBR = PAGE_TABLE_BASE;
+PTLR = 3;
+
+[PTBR + 0] = 65;
+[PTBR + 1] = "0100";
+[PTBR + 2] = 66;
+[PTBR + 3] = "0100";
+[PTBR + 4] = 76;
+[PTBR + 5] = "0100";
+
+
+//set the top of stack as 0(76th page) , physical memmory of user program
+[76*512] = 0;      
+SP = 2 * 512;
+
+
+ireturn;
