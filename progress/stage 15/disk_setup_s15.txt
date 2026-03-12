@@ -1,0 +1,13 @@
+load --library ../expl/library.lib
+load --int=10 ../spl/spl_progs/int_10_s14.xsm
+load --int=7 ../spl/spl_progs/int_7_s15.xsm
+load --os $HOME/myexpos/spl/spl_progs/os_startup_s14.xsm
+load --int=timer ../spl/spl_progs/sample_timer_multi_s14.xsm
+load --init $HOME/myexpos/expl/samples/num_odd.xsm
+load --idle $HOME/myexpos/expl/samples/idle.xsm
+load --exhandler ../spl/spl_progs/haltprog.xsm
+load --module 7 ../spl/spl_progs/boot_module_s15.xsm
+load --module 5 ../spl/spl_progs/mod_5_s14.xsm
+load --exec $HOME/myexpos/expl/samples/num_even.xsm
+load --module 0 ../spl/spl_progs/mod_0_s15.xsm
+load --module 4 ../spl/spl_progs/mod_4_s15.xsm

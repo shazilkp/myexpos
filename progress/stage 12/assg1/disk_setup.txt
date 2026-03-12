@@ -1,0 +1,8 @@
+load --library ../expl/library.lib
+load --int=10 ../spl/spl_progs/haltprog.xsm
+load --int=7 ../spl/spl_progs/sample_int7.xsm
+load --os $HOME/myexpos/spl/spl_progs/os_startup_multi_assg.xsm
+load --int=timer ../spl/spl_progs/sample_timer_multi.xsm
+load --init $HOME/myexpos/expl/samples/hundred.xsm
+load --idle $HOME/myexpos/expl/samples/twohundred.xsm
+load --exhandler ../spl/spl_progs/haltprog.xsm

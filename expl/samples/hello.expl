@@ -1,0 +1,15 @@
+int main(){
+decl
+    int n,temp;
+    str out;
+enddecl
+
+begin
+    
+    out = "Hello ";
+    temp = exposcall("Write",-2,out);
+    
+
+    return 0;
+end
+}

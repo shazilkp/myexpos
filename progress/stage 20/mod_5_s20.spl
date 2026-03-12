@@ -1,0 +1,53 @@
+//scheduler module
+
+alias currentPID R0;
+currentPID = [SYSTEM_STATUS_TABLE + 1];
+
+
+multipush (BP);
+
+[PROCESS_TABLE + (currentPID*16) + 12] = SP % 512;       //kptr
+[PROCESS_TABLE + (currentPID*16) + 14] = PTBR;          //ptbr
+[PROCESS_TABLE + (currentPID*16) + 15] = PTLR;          //ptlr
+
+alias i R1;
+alias newPID R2;
+
+i = currentPID + 1;
+i = i % 16;
+
+while(i != currentPID)do
+    if(i != 0)then
+        if([PROCESS_TABLE + (i*16) + 4] == READY || [PROCESS_TABLE + (i*16) + 4] == CREATED) then
+                newPID = i;
+                break;
+            endif;
+    endif;
+    i = i + 1;
+    i = i % 16;
+   
+endwhile;
+
+if(i == currentPID)then
+    newPID = 0;
+endif;
+
+//sp = (uapn * 512 + kptr) of new process
+SP = ([PROCESS_TABLE + (newPID*16) + 11] * 512 ) + [PROCESS_TABLE + (newPID*16) + 12];
+
+PTBR = [PROCESS_TABLE + (newPID*16) + 14];          //ptbr
+PTLR = [PROCESS_TABLE + (newPID*16) + 15];
+
+[SYSTEM_STATUS_TABLE + 1] = newPID;
+
+if([PROCESS_TABLE + (newPID*16) + 4] == CREATED) then
+    SP = [PROCESS_TABLE + (newPID*16) + 13];        //uptr
+    [PROCESS_TABLE + (newPID*16) + 4] = RUNNING;
+    [PROCESS_TABLE + (newPID*16) + 9] = 0;          //SWAP flag
+    BP = [[PROCESS_TABLE + (newPID*16) + 11] * 512];
+    ireturn;
+endif;
+
+[PROCESS_TABLE + (newPID*16) + 4] = RUNNING;
+multipop (BP);
+return;
