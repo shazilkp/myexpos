@@ -1,0 +1,7 @@
+print("maxPages");
+print(128 - [MIN_MEM_USAGE]);
+print("diskAccess");
+print([DISK_ACCESS_COUNT]);
+print("contextSwitch");
+print([CONTEXT_SWITCH_COUNT]);
+halt;

@@ -1,0 +1,106 @@
+alias userSP R1;
+userSP = SP;
+
+//switch to kernel stack
+alias pt_sst R2;
+pt_sst = PROCESS_TABLE + ([SYSTEM_STATUS_TABLE +1] * 16);
+[pt_sst + 13] = SP;
+SP = [pt_sst + 11]*512 - 1;
+
+//extract syscall no
+alias syscall_no R3;
+R3 = userSP -5;
+syscall_no = [[PTBR + (R3/512)*2]*512 + (R3%512) ];
+
+//mode FLAG
+[pt_sst + 9] = syscall_no;
+
+//SEMGET - 17
+if(syscall_no == INT_SEMGET) then
+    //find free entry in per process resource TABLE
+    alias res_i R4;
+    res_i =0;
+    while(res_i < 8) do
+            if([[pt_sst + 11]*512 + RESOURCE_TABLE_OFFSET + res_i*2] == -1) then
+                break;
+            endif;
+            res_i = res_i + 1;
+    endwhile;
+    //if no free entry, return -1
+    if(res_i == 8) then
+        [[PTBR + ((userSP -1)/512)*2]*512 + (userSP -1)%512] = -1; //RETURN value
+        [pt_sst + 9] = 0;//mode flag reset
+        SP = userSP;//switch to user stack
+        ireturn;
+    endif;
+
+    //Resource Identifier field of the per-process resource table entry is set to 1 to indicate that the resource is a semaphore.
+    [[pt_sst + 11]*512 + RESOURCE_TABLE_OFFSET + res_i*2] = SEMAPHORE;
+
+    //Acquire semaphore 
+    multipush(R1,R2,R3,R4);
+    R1=ACQUIRE_SEMAPHORE;
+    R2=[SYSTEM_STATUS_TABLE+1];
+    call RESOURCE_MANAGER; //MOD 0
+    multipop(R1,R2,R3,R4);
+
+    //If there are no free semaphores, return -2.
+    if(R0==-1)  then
+        [[PTBR + ((userSP -1)/512)*2]*512 + (userSP -1)%512] = -2; //RETURN
+        [pt_sst + 9] = 0; // mode flag reset
+        SP = userSP;//switch to user stack
+        ireturn;
+    endif;
+
+    //store index of semaphore in resource table
+    [[pt_sst + 11]*512 + RESOURCE_TABLE_OFFSET + res_i*2 + 1] = R0;
+
+    //switch to user stack
+    SP = userSP;
+    //mode
+    [pt_sst + 9] = 0;   
+    //return value should be the semaphore descriptor or per process resource table entry Identifier
+    [[PTBR + ((userSP -1)/512)*2]*512 + (userSP -1)%512] = res_i;
+    ireturn;
+endif;
+
+//SEMRELEASE - 18
+if(syscall_no == INT_SEMRELEASE) then
+    //extract sem id
+    alias sem_desc R4;
+    sem_desc = [[PTBR + ((userSP - 4)/512)*2]*512 + (userSP - 4)%512];
+
+    //if sem desc is invalid OR if sem id field in pprt is not a semaphore, return -1
+    if(sem_desc<0 || sem_desc>7 || [[pt_sst + 11]*512 + RESOURCE_TABLE_OFFSET + sem_desc*2] != SEMAPHORE) then
+        [[PTBR + ((userSP -1)/512)*2]*512 + (userSP -1)%512] = -1; //RETURN
+        [pt_sst + 9] = 0; // mode flag reset
+        SP = userSP;//switch to user stack
+        ireturn;
+    endif;
+
+    //RELEASE_SEMAPHORE
+    multipush(R1,R2,R3,R4);
+    R1 = RELEASE_SEMAPHORE;
+    R2 = [[pt_sst + 11]*512 + RESOURCE_TABLE_OFFSET + sem_desc*2 + 1];
+    R3 = [SYSTEM_STATUS_TABLE + 1];
+    call RESOURCE_MANAGER; //MOD 0 
+    multipop(R1,R2,R3,R4);
+
+    //invalidate per process resource table entry
+    [[pt_sst + 11]*512 + RESOURCE_TABLE_OFFSET + sem_desc*2] = -1;
+    [[pt_sst + 11]*512 + RESOURCE_TABLE_OFFSET + sem_desc*2 + 1] = -1;
+
+    //switch to user stack
+    SP = userSP;
+    //mode
+    [pt_sst + 9] = 0;   
+    //return value 0 for SUCCESS
+    [[PTBR + ((userSP -1)/512)*2]*512 + (userSP -1)%512] = 0;
+    ireturn;
+endif;
+
+// //mode flag reset
+// [pt_sst + 9]=0;
+// //switch to user stack
+// SP=userSP;
+ireturn;

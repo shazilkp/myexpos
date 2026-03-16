@@ -1,0 +1,109 @@
+alias userSP R1;
+userSP = SP;
+
+// save user SP and switch to kernel stack
+
+[PROCESS_TABLE + ([SYSTEM_STATUS_TABLE +1] * 16) + 13] = SP;
+SP = [PROCESS_TABLE + ([SYSTEM_STATUS_TABLE +1] * 16) + 11]*512 - 1;
+
+// get syscall number from user stack and set mode flag
+alias syscall_no R3;
+syscall_no = [[PTBR + ((userSP - 5)/512)*2]*512 + ((userSP - 5)%512)];
+
+[PROCESS_TABLE + ([SYSTEM_STATUS_TABLE +1] * 16) + 9] = syscall_no;
+
+// SEMLOCK
+if(syscall_no == INT_SEMLOCK) then
+    alias sem_desc R4;
+    sem_desc = [[PTBR + ((userSP - 4)/512)*2]*512 + (userSP - 4)%512];
+
+    // invalid descriptor or not a semaphore resource
+    if(sem_desc<0) then
+    print "lockerr:desc<0";
+    print sem_desc;
+    endif;
+    if(sem_desc>7) then
+    print "lockerr:desc>7";
+    print sem_desc;
+    endif;
+    if(sem_desc>=0 && sem_desc<=7) then
+    if([[PROCESS_TABLE + ([SYSTEM_STATUS_TABLE +1] * 16) + 11]*512 + RESOURCE_TABLE_OFFSET + sem_desc*2] != SEMAPHORE) then
+    print "lockerr:not_sem";
+    print sem_desc;
+    print [[PROCESS_TABLE + ([SYSTEM_STATUS_TABLE +1] * 16) + 11]*512 + RESOURCE_TABLE_OFFSET + sem_desc*2];
+    endif;
+    endif;
+    if(sem_desc<0 || sem_desc>7 || [[PROCESS_TABLE + ([SYSTEM_STATUS_TABLE +1] * 16) + 11]*512 + RESOURCE_TABLE_OFFSET + sem_desc*2] != SEMAPHORE) then
+            [[PTBR + ((userSP -1)/512)*2]*512 + (userSP -1)%512] = -1;
+            [PROCESS_TABLE + ([SYSTEM_STATUS_TABLE +1] * 16) + 9] = 0;
+    SP = userSP;
+    ireturn;
+    endif;
+
+    // get semaphore table index from resource table
+    alias sem_id R5;
+    sem_id = [[PROCESS_TABLE + ([SYSTEM_STATUS_TABLE +1] * 16) + 11]*512 + RESOURCE_TABLE_OFFSET + sem_desc*2 + 1];
+
+    // wait if semaphore is locked by someone else
+    while(([SEMAPHORE_TABLE + sem_id*4] != -1) && ([SEMAPHORE_TABLE + sem_id*4] != [SYSTEM_STATUS_TABLE + 1])) do
+        [PROCESS_TABLE + ([SYSTEM_STATUS_TABLE +1] * 16) + 4] = WAIT_SEMAPHORE;
+        [PROCESS_TABLE + ([SYSTEM_STATUS_TABLE +1] * 16) + 5] = sem_id;
+        multipush(R1,R2,R3,R4,R5);
+        call MOD_5;
+        multipop(R1,R2,R3,R4,R5);
+    endwhile;
+
+    // lock it and return 0
+    [SEMAPHORE_TABLE + sem_id*4] = [SYSTEM_STATUS_TABLE + 1];
+    [PROCESS_TABLE + ([SYSTEM_STATUS_TABLE +1] * 16) + 9] = 0;
+    SP = userSP;
+    [[PTBR + ((userSP -1)/512)*2]*512 + (userSP -1)%512] = 0;
+    ireturn;
+endif;
+
+// SEMUNLOCK
+if(syscall_no == INT_SEMUNLOCK) then
+    alias sem_desc R4;
+    sem_desc = [[PTBR + ((userSP - 4)/512)*2]*512 + (userSP - 4)%512];
+
+    // invalid descriptor or not a semaphore resource
+    if(sem_desc<0 || sem_desc>7 || [[PROCESS_TABLE + ([SYSTEM_STATUS_TABLE +1] * 16) + 11]*512 + RESOURCE_TABLE_OFFSET + sem_desc*2] != SEMAPHORE) then
+        [[PTBR + ((userSP -1)/512)*2]*512 + (userSP -1)%512] = -1;
+        [PROCESS_TABLE + ([SYSTEM_STATUS_TABLE +1] * 16) + 9] = 0;
+        SP = userSP;
+        ireturn;
+    endif;
+
+    alias sem_id R5;
+    sem_id = [[PROCESS_TABLE + ([SYSTEM_STATUS_TABLE +1] * 16) + 11]*512 + RESOURCE_TABLE_OFFSET + sem_desc*2 + 1];
+
+    if([SEMAPHORE_TABLE + sem_id*4] != -1) then
+        // someone else locked it, cant unlock
+        if([SEMAPHORE_TABLE + sem_id*4] != [SYSTEM_STATUS_TABLE + 1]) then
+            [[PTBR + ((userSP -1)/512)*2]*512 + (userSP -1)%512] = -2;
+            [PROCESS_TABLE + ([SYSTEM_STATUS_TABLE +1] * 16) + 9] = 0;
+            SP = userSP;
+            ireturn;
+        endif;
+
+        // unlock and wake up anyone waiting on this semaphore
+        [SEMAPHORE_TABLE + sem_id*4] = -1;
+        alias i R6;
+        i = 0;
+        while(i < MAX_PROC_NUM) do
+            if([PROCESS_TABLE + i*16 + 4] == WAIT_SEMAPHORE && [PROCESS_TABLE + i*16 + 5] == sem_id) then
+                [PROCESS_TABLE + i*16 + 4] = READY;
+                [PROCESS_TABLE + i*16 + 5] = -1;
+            endif;
+            i = i + 1;
+        endwhile;
+    endif;
+
+    // return 0
+    [PROCESS_TABLE + ([SYSTEM_STATUS_TABLE +1] * 16) + 9] = 0;
+    SP = userSP;
+    [[PTBR + ((userSP -1)/512)*2]*512 + (userSP -1)%512] = 0;
+    ireturn;
+endif;
+
+ireturn;

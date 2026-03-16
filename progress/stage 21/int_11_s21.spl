@@ -46,6 +46,7 @@ if(syscall == 13)then
         [[PTBR + 2 * (userSP - 1) /512]* 512 + ((userSP - 1) % 512)] = -1;      //return value set to -1
         [PROCESS_TABLE + (currentPID * 16) + 9] = 0;                            //mode flag reset
         SP = [PROCESS_TABLE + ( currentPID * 16) + 13];                         //revert stack
+        ireturn;
     endif;
 
     [PROCESS_TABLE + ( currentPID * 16) + 4] = WAIT_PROCESS;

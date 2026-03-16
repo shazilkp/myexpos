@@ -12,7 +12,7 @@ if(functionNum == 1)  then
     [SYSTEM_STATUS_TABLE + 3] = [SYSTEM_STATUS_TABLE + 3] + 1;
 
     //while memory is full ie wait for memory
-    while([SYSTEM_STATUS_TABLE + 3] == 0)do
+    while([SYSTEM_STATUS_TABLE + 2] == 0)do
         [PROCESS_TABLE + 16 * ([SYSTEM_STATUS_TABLE + 1]) + 4] = WAIT_MEM;
 
         multipush(R1);
@@ -24,6 +24,14 @@ if(functionNum == 1)  then
 
     //decrement WAIT_MEM_COUNT
     [SYSTEM_STATUS_TABLE + 3] = [SYSTEM_STATUS_TABLE + 3] - 1;
+
+    //decrement MEM_FREE_COUNT
+    [SYSTEM_STATUS_TABLE + 2] = [SYSTEM_STATUS_TABLE + 2] - 1;
+
+    
+    if ([SYSTEM_STATUS_TABLE + 2] < [MIN_MEM_USAGE]) then
+        [MIN_MEM_USAGE] = [SYSTEM_STATUS_TABLE + 2];
+    endif;
 
     alias memoryFreeIndex R2;
     // since available pages for user processes are from 76 to 127
@@ -88,7 +96,7 @@ if(functionNum == 5)  then
     while(pid < 16)do
         i = 0;
         while(i < 10)do
-            if(DISK_MAP_TABLE + (10 * pid) + i == blockNo)then
+            if([DISK_MAP_TABLE + (10 * pid) + i] == blockNo)then
                 //[PROCESS_TABLE + 16*pid + 14] = PTBR
                 //here i would also be our offset in page table since we 
                 //follow same order in disk map table and in page table
@@ -126,29 +134,6 @@ if(functionNum == 5)  then
 
     R0 = R3;        //return with pageNo used to load block
     // breakpoint;
-
-    pid = 0;
-    while(pid < 16)do
-        i = 0;
-        while(i < 10)do
-            if(DISK_MAP_TABLE + (10 * pid) + i == blockNo)then
-                //[PROCESS_TABLE + 16*pid + 14] = PTBR
-                //here i would also be our offset in page table since we 
-                //follow same order in disk map table and in page table
-
-                pageNo = [[PROCESS_TABLE + 16*pid + 14] + 2*i];
-
-                if(pageNo != -1 )then
-                    [MEMORY_FREE_LIST + pageNo] = [MEMORY_FREE_LIST + pageNo] + 1;
-                    R0 = pageNo;
-                    return;
-                 endif;
-            endif;
-            i = i + 1;
-        endwhile;
-        pid = pid + 1;
-    endwhile;
-    
     return;
 
 endif;

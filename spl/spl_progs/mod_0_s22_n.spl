@@ -1,0 +1,115 @@
+//Terminal Handling
+
+//F8 : Acquire Terminal
+
+alias fnno  R1;
+alias currentPID R2;
+
+if(fnno == 8) then
+	//busy wait
+	while([TERMINAL_STATUS_TABLE] == 1) do
+		[PROCESS_TABLE  + currentPID*16 + 4]=WAIT_TERMINAL;
+		multipush(R1,R2);
+		call  MOD_5;//scheduler
+		multipop(R1,R2);
+	endwhile;
+	[TERMINAL_STATUS_TABLE]= 1;
+	[TERMINAL_STATUS_TABLE+1] = currentPID;
+	
+	return;
+endif;
+//F8 : Release Terminal
+if(fnno == 9) then
+	if(currentPID!=[TERMINAL_STATUS_TABLE+1]) then
+		R0=-1;
+		return;
+	endif;
+	[TERMINAL_STATUS_TABLE] =0;
+	R3=1;
+	while(R3<16) do
+		if([PROCESS_TABLE  + R3*16 + 4]==WAIT_TERMINAL)then
+			[PROCESS_TABLE  + R3*16 + 4] = READY;
+		endif;
+		R3=R3+1;
+	endwhile;
+	R0=0;
+	return;
+endif;
+
+
+//F3: Acquire Disk
+//while ( disk is locked ){        /* Check the Status field in the Disk Status Table. */
+//    Set state of the process as ( WAIT_DISK , - );
+//    Call the switch_context() function from the Scheduler Module.
+//}
+//Lock the disk by setting PID and the status field in the Disk Status Table.
+//return;
+
+if(fnno==3) then
+	while([DISK_STATUS_TABLE]==1) do
+		[PROCESS_TABLE+currentPID*16+4]=WAIT_DISK;
+		multipush(R0,R1,R2);
+		call MOD_5;//scheduler
+		//When the disk is finally free, the process is woken up by the disk interrupt handler
+		multipop(R0,R1,R2);
+	endwhile;
+
+	[DISK_STATUS_TABLE]=1;
+	[DISK_STATUS_TABLE+4]=currentPID;
+	return;
+endif;
+
+//F6: Acquire semaphore
+if(fnno == ACQUIRE_SEMAPHORE) then
+	//Find the index of a free entry in Semaphore table. If no free entry, return -1.
+	alias sem_i R3;
+	sem_i =0;
+	while(sem_i < MAX_SEM_COUNT) do
+		if([SEMAPHORE_TABLE + sem_i*4 + 1] == 0) then
+			break;
+		endif;
+		sem_i = sem_i+1;
+	endwhile;
+
+	//If no free entry, return -1
+	if(sem_i == MAX_SEM_COUNT) then
+		R0 = -1;
+		return;
+	endif;
+
+	//Set process count to 1 and locking pid to -1
+	[SEMAPHORE_TABLE + sem_i*4 + 1] = 1;
+	[SEMAPHORE_TABLE + sem_i*4 ] = -1;
+
+	//Return semaphore index
+	R0 = sem_i;
+
+	return;
+endif;
+
+
+//F7: Release semaphore
+if(fnno == RELEASE_SEMAPHORE) then
+	alias sem_i R2;
+	alias PID R3;
+
+	//if sem locked by current process
+	if([SEMAPHORE_TABLE + sem_i*4] == PID) then
+		[SEMAPHORE_TABLE + sem_i*4] = -1; // unlock semaphore
+		//wake up processes blocked by sem
+		alias i R4;
+		i =0 ;
+		while(i<16) do
+			if([PROCESS_TABLE + i*16 + 4]==WAIT_SEMAPHORE && [PROCESS_TABLE + i*16 + 5]==sem_i ) then
+				[PROCESS_TABLE + i*16 + 4] = READY;
+			endif;
+			i=i+1;
+		endwhile;
+	endif;
+
+	//decrement process count of sem in sem sem table
+	[SEMAPHORE_TABLE + sem_i*4 + 1] = [SEMAPHORE_TABLE + sem_i*4 + 1] - 1;
+	return;
+endif;
+
+return;

@@ -6,7 +6,7 @@
 //setting the last address in kernal stack(since empty )
 SP = [PROCESS_TABLE + ([SYSTEM_STATUS_TABLE + 1] * 16) + 11] * 512 - 1;
 backup;
-
+[DISK_ACCESS_COUNT] = [DISK_ACCESS_COUNT] + 1;
 //interrupt handler code
 
 

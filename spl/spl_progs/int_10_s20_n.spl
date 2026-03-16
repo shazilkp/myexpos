@@ -15,4 +15,4 @@ call MOD_1;   //Process Manager Module
 multipop(R1,R2);
 
 //SCHEDULER
-call MOD_5; 
+call MOD_5;

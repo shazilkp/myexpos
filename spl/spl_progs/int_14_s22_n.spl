@@ -1,0 +1,118 @@
+// breakpoint;
+alias userSP R1;
+userSP = SP;
+
+//switch to kernel stack
+alias pt_sst R2;
+pt_sst = PROCESS_TABLE + ([SYSTEM_STATUS_TABLE +1] * 16);
+[pt_sst + 13] = SP;
+SP = [pt_sst + 11]*512 - 1;
+
+//extract syscall no
+alias syscall_no R3;
+R3 = userSP -5;
+syscall_no = [[PTBR + (R3/512)*2]*512 + (R3%512) ];
+
+//mode FLAG
+[pt_sst + 9] = syscall_no;
+
+//SEMLOCK -- 19
+if(syscall_no == INT_SEMLOCK) then
+    //extract sem desc
+    alias sem_desc R4;
+    sem_desc = [[PTBR + ((userSP - 4)/512)*2]*512 + (userSP - 4)%512];
+    
+    //if sem desc is invalid OR if sem id field in pprt is not a semaphore, return -1
+    if(sem_desc<0 || sem_desc>7 || [[pt_sst + 11]*512 + RESOURCE_TABLE_OFFSET + sem_desc*2] != SEMAPHORE) then
+        [[PTBR + ((userSP -1)/512)*2]*512 + (userSP -1)%512] = -1; //RETURN
+        [pt_sst + 9] = 0; // mode flag reset
+        SP = userSP;//switch to user stack
+        print "lockerror";
+        ireturn;
+    endif;
+
+    alias sem_id R5;
+    sem_id= [[pt_sst + 11]*512 + RESOURCE_TABLE_OFFSET + sem_desc*2 +1];
+    // while the semaphore is locked by a process other than the current process do    /* Check the Locking PID field in the Semaphore table */
+    //           Change the state of the current process to (WAIT_SEMAPHORE, Semaphore table index of the locked semaphore).
+    //           Invoke the switch_context() function in the Scheduler Module.
+    // endwhile
+    while(([SEMAPHORE_TABLE + sem_id*4] != -1)  && ([SEMAPHORE_TABLE + sem_id*4] != [SYSTEM_STATUS_TABLE + 1])) do
+        [pt_sst + 4] = WAIT_SEMAPHORE;
+        [pt_sst + 5] = sem_id;
+        multipush(R1,R2,R3,R4,R5);
+        call MOD_5;//scheduler
+        multipop(R1,R2,R3,R4,R5);
+    endwhile;
+
+    //Once sem is free
+    //Change locking pid
+    [SEMAPHORE_TABLE + sem_id*4]= [SYSTEM_STATUS_TABLE +1];
+    //mode flag reset
+    [pt_sst + 9]=0;
+    //switch to user stack
+    SP=userSP;
+
+    //return 0
+    [[PTBR + ((userSP -1)/512)*2]*512 + (userSP -1)%512] = 0; 
+    ireturn;
+
+endif;
+
+
+// SEM UNLOCK -- 20
+if(syscall_no == INT_SEMUNLOCK) then
+    //extract sem desc
+    alias sem_desc R4;
+    sem_desc = [[PTBR + ((userSP - 4)/512)*2]*512 + (userSP - 4)%512];
+    
+    //if sem desc is invalid OR if sem id field in pprt is not a semaphore, return -1
+    if(sem_desc<0 || sem_desc>7 || [[pt_sst + 11]*512 + RESOURCE_TABLE_OFFSET + sem_desc*2] != SEMAPHORE) then
+        [[PTBR + ((userSP -1)/512)*2]*512 + (userSP -1)%512] = -1; //RETURN
+        [pt_sst + 9] = 0; // mode flag reset
+        SP = userSP;//switch to user stack
+        ireturn;
+    endif;
+
+    alias sem_id R5;
+    sem_id= [[pt_sst + 11]*512 + RESOURCE_TABLE_OFFSET + sem_desc*2 +1];
+    //if sem is locked
+    if([SEMAPHORE_TABLE + sem_id*4] != -1) then
+        //current process did not lock the semaphore
+        if([SEMAPHORE_TABLE + sem_id*4] != [SYSTEM_STATUS_TABLE + 1]) then
+            [[PTBR + ((userSP -1)/512)*2]*512 + (userSP -1)%512] = -2; //RETURN
+            [pt_sst + 9] = 0; // mode flag reset
+            SP = userSP;//switch to user stack
+            ireturn;
+        endif;
+        //else
+        //Set locking pid to -1
+        [SEMAPHORE_TABLE + sem_id*4] = -1;
+
+        //wake up all processes waiting on the semaphore
+        alias i R6;
+        i =0;
+        while(i<MAX_PROC_NUM) do
+            if([PROCESS_TABLE + i*16 + 4] == WAIT_SEMAPHORE && [PROCESS_TABLE + i*16 + 5] == sem_id) then
+                [PROCESS_TABLE + i*16 + 4] = READY;
+                [PROCESS_TABLE + i*16 + 5] = -1;
+            endif;
+            i = i+1;
+        endwhile;
+
+    endif;
+    //mode flag reset
+    [pt_sst + 9]=0;
+    //switch to user stack
+    SP=userSP;
+    //return
+    [[PTBR + ((userSP -1)/512)*2]*512 + (userSP -1)%512] = 0; //RETURN
+ireturn;
+endif;
+
+
+// mode flag reset
+// [pt_sst + 9]=0;
+// switch to user stack
+// SP=userSP;
+ireturn;

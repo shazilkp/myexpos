@@ -1,0 +1,94 @@
+//kernel stack
+alias userSP R2;
+userSP = SP;
+
+alias pt_sst R5;
+pt_sst=PROCESS_TABLE + ([SYSTEM_STATUS_TABLE +1] * 16) ;
+[pt_sst+13] =userSP;
+SP = [pt_sst + 11]* 512 -1;
+
+alias syscall R3;
+R1 = userSP -5;
+//PTBR= [pt_sst+14];
+syscall = [[PTBR + (R1/512)*2]*512 + (R1%512)];
+
+//Getpid
+if(syscall == 11) then
+    // [pt_sst + 9] = 11; //mode flag
+    R1 = userSP - 1; //return value
+    [[PTBR + (R1/512)*2]*512 + (R1%512)] = [SYSTEM_STATUS_TABLE + 1];
+
+    [pt_sst + 9] = 0; //mode flag
+    SP = userSP;
+    ireturn;
+endif;
+
+//Getppid
+if(syscall == 12) then
+    // [pt_sst + 9] = 12; //mode flag
+    R1 = userSP - 1; //return value
+    [[PTBR + (R1/512)*2]*512 + (R1%512)] = [pt_sst + 2];
+
+    [pt_sst + 9] = 0; //mode flag
+    SP = userSP;
+    ireturn;
+endif;
+
+//Wait
+if(syscall == 13) then
+    //Mode flag
+    [pt_sst + 9] = 13;
+    //Extract pid
+    R1 = userSP - 4;
+    alias wait_pid R4;
+    wait_pid = [[PTBR + (R1/512)*2]*512 + (R1%512)];
+    //Check if pid is valid
+    if(wait_pid == [SYSTEM_STATUS_TABLE+1] || [PROCESS_TABLE+16*wait_pid + 4]== TERMINATED || wait_pid<0 || wait_pid>15) then
+        R1= userSP-1;
+        [[PTBR + (R1/512)*2]*512 + (R1%512)]=-1; //return value
+        [pt_sst +9] =0; //mode flag
+        SP = userSP;
+        ireturn;
+    endif;
+
+    //Change state of current process
+    [pt_sst + 4] = WAIT_PROCESS;
+    [pt_sst + 5] = wait_pid;
+
+    multipush(R0,R1,R2,R3,R4,R5);
+    call SCHEDULER;
+    multipop(R0,R1,R2,R3,R4,R5);
+
+    //Continue execution after wait is over
+    [pt_sst + 9] = 0; //mode flag
+    R1= userSP-1;
+    [[PTBR + (R1/512)*2]*512 + (R1%512)]=0; //return value    
+    SP = userSP;
+    ireturn;
+
+endif;
+
+//Signal
+if(syscall == 14) then 
+    [pt_sst + 9] = 14; //Mode flag
+    R1 = PROCESS_TABLE + 0;
+    R6 = PROCESS_TABLE + (MAX_PROC_NUM-1)*16;
+    //LOOP thru all process and find if any are waiting for this process
+    while(R1<=R6) do
+        if([R1 + 4] == WAIT_PROCESS && [R1 + 5] == [SYSTEM_STATUS_TABLE + 1]) then
+            [R1 + 4] = READY;
+            [R1 + 5] = -1;
+        endif;
+        R1= R1 + 16;
+    endwhile; 
+
+    [pt_sst + 9] = 0; //Mode flag
+    R1= userSP-1;
+    [[PTBR + (R1/512)*2]*512 + (R1%512)]=0; //return value    
+    SP = userSP;
+    ireturn;
+endif;
+
+//Change back to the user stack and return to the user mode.
+SP = userSP;
+ireturn;

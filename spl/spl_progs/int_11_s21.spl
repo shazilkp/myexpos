@@ -1,7 +1,7 @@
 alias syscall R4;
 alias currentPID R3;
 
-breakpoint;
+
 currentPID = [SYSTEM_STATUS_TABLE + 1];
 
 // PTBR = PAGE_TABLE_BASE + 20*currentPID;
@@ -46,6 +46,7 @@ if(syscall == 13)then
         [[PTBR + 2 * (userSP - 1) /512]* 512 + ((userSP - 1) % 512)] = -1;      //return value set to -1
         [PROCESS_TABLE + (currentPID * 16) + 9] = 0;                            //mode flag reset
         SP = [PROCESS_TABLE + ( currentPID * 16) + 13];                         //revert stack
+        ireturn;
     endif;
 
     [PROCESS_TABLE + ( currentPID * 16) + 4] = WAIT_PROCESS;
@@ -61,7 +62,7 @@ endif;
 
 //Signal
 if(syscall == 14)then
-    [PROCESS_TABLE + (currentPID * 16) + 9] = 13;        //mode flag set to syscall
+    [PROCESS_TABLE + (currentPID * 16) + 9] = 14;        //mode flag set to syscall
     R2 = 0;
     while(R2 < 16)do
         if([PROCESS_TABLE + (R2 * 16) + 4] == WAIT_PROCESS && [PROCESS_TABLE + (R2 * 16) + 5] == currentPID)then

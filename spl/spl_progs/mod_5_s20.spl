@@ -1,5 +1,8 @@
 //scheduler module
 
+
+[CONTEXT_SWITCH_COUNT] = [CONTEXT_SWITCH_COUNT] + 1;
+
 alias currentPID R0;
 currentPID = [SYSTEM_STATUS_TABLE + 1];
 

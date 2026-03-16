@@ -1,14 +1,25 @@
-breakpoint;
+
 //mode flag set to -1 indication execption
 [PROCESS_TABLE + ( [SYSTEM_STATUS_TABLE + 1] * 16) + 9] = -1;
 //storing the user stack pointer into usptr(13th word) of the process tav-ble entry accessed using pid
 //from the system status table
-[PROCESS_TABLE + ( [SYSTEM_STATUS_TABLE + 1] * 16) + 13] = SP;
-alias  userSP R1;
-userSP = SP;
-//setting the last address in kernal stack(since empty )
+
+
+//THIS CAUSES FAILURE BUT BOTTOM WORKS
+// [PROCESS_TABLE + ( [SYSTEM_STATUS_TABLE + 1] * 16) + 13] = SP;
+// alias  userSP R1;
+// userSP = SP;
+// //setting the last address in kernal stack(since empty )
+// SP = [PROCESS_TABLE + ([SYSTEM_STATUS_TABLE + 1] * 16) + 11] * 512 - 1;
+// backup;
+
+
+
+[PROCESS_TABLE + ([SYSTEM_STATUS_TABLE + 1] * 16) + 13] = SP;
 SP = [PROCESS_TABLE + ([SYSTEM_STATUS_TABLE + 1] * 16) + 11] * 512 - 1;
 backup;
+alias userSP R1;
+userSP = [PROCESS_TABLE + ([SYSTEM_STATUS_TABLE + 1] * 16) + 13];
 
 multipush(EIP);
 
@@ -18,13 +29,13 @@ if(EC != 0) then
     if (EC == 1) then
         print "1-Ill Inst";
 
-        print(EIP);
-        // breakpoint;
+        // print(EIP);
+        breakpoint;
     endif;
     if (EC == 2) then
         print "2-Ill Mem acc at ";
-        print(EIP);
-        // breakpoint;
+        // print(EIP);
+        breakpoint;
     endif;
     if (EC == 3) then
         print "3-Ari Exc";
@@ -61,6 +72,9 @@ else
             call MEMORY_MANAGER;
 
             multipop(EPN);
+
+            // print("here");
+            // print(R0);
 
             [PAGE_TABLE_BASE + 20 * [SYSTEM_STATUS_TABLE + 1] + EPN*2] = R0;
             [PAGE_TABLE_BASE + 20 * [SYSTEM_STATUS_TABLE + 1] + EPN*2 + 1] = "1100";
@@ -106,5 +120,5 @@ SP = [PROCESS_TABLE + ( [SYSTEM_STATUS_TABLE + 1] * 16) + 13];
 SP = SP + 1;
 
 //sp is user sp so we do address transl and store the eip in stack to be re executed
-[[PTBR + 2 * (SP/512)] * 512 + (SP%512)] = EIP;
+[[PAGE_TABLE_BASE + 20*[SYSTEM_STATUS_TABLE+1] + 2 * (SP/512)] * 512 + (SP%512)] = EIP;
 ireturn;

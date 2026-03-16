@@ -1,6 +1,6 @@
-DISK_SETUP := xfs-interface/disk_setup_s21.txt
+DISK_SETUP := xfs-interface/disk_setup_s22.txt
 PROGRAMS_STAMP := .programs_built
-LOAD_STAMP := .disk_loaded_s21
+LOAD_STAMP := .disk_loaded_s22
 
 .PHONY: all clean run programs
 
@@ -34,7 +34,7 @@ programs: $(PROGRAMS_STAMP)
 # Load disk (stamp file)
 # -------------------------------
 $(LOAD_STAMP): $(DISK_SETUP) $(PROGRAMS_STAMP)
-	cd xfs-interface && ./xfs-interface < disk_setup_s21.txt
+	cd xfs-interface && ./xfs-interface < disk_setup_s22.txt
 	touch $(LOAD_STAMP)
 
 # -------------------------------

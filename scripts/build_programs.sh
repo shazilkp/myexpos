@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -e
 
-DISK_FILE="xfs-interface/disk_setup_s21.txt"
+DISK_FILE="xfs-interface/disk_setup_s22.txt"
 ROOT_DIR="$(pwd)"
 DISK_DIR="$(cd "$(dirname "$DISK_FILE")" && pwd)"
 
