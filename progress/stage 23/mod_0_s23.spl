@@ -1,0 +1,164 @@
+alias functionNum R1;
+alias currentPID R2;
+
+
+
+//Acquire Disk
+if(functionNum == 3)then
+    while([DISK_STATUS_TABLE+0] == 1)do     //do till we get terminal
+        [PROCESS_TABLE + (currentPID * 16) + 4] = WAIT_DISK;
+        multipush(R1,R2);
+        call SCHEDULER;
+        multipop(R1,R2);
+    endwhile;
+
+    [DISK_STATUS_TABLE + 0] = 1;
+    [DISK_STATUS_TABLE + 4] = currentPID;
+    return;
+endif;
+
+//Acquire Inode(3)
+if(functionNum == ACQUIRE_INODE)then
+    alias inodeIndex R2;
+    alias PID R3;
+    while([FILE_STATUS_TABLE + inodeIndex * 4 + 0] != -1)do     //do till we get file
+        [PROCESS_TABLE + (PID * 16) + 4] = WAIT_FILE;
+        [PROCESS_TABLE + (PID * 16) + 5] = inodeIndex;
+        multipush(R1,R2,R3);
+        call SCHEDULER;
+        multipop(R1,R2,R3);
+    endwhile;
+
+
+    if ([INODE_TABLE + inodeIndex * 16 + 1] == -1) then
+        R0 = -1;
+        return;
+    endif;
+
+    [FILE_STATUS_TABLE + inodeIndex * 4 + 0] = PID;
+    R0 = 0;
+    return;
+endif;
+
+//Release Inode(4)
+if(functionNum == RELEASE_INODE)then
+    alias inodeIndex R2;
+    alias PID R3;
+
+    if([FILE_STATUS_TABLE + inodeIndex * 4 + 0] != PID)then
+        R0 = -1;
+        return; 
+    endif;
+
+    [INODE_TABLE + inodeIndex * 16 + 1] = -1;       //FREE THE LOCK 
+
+    alias i R4;
+    i = 0;
+    while(i < MAX_PROC_NUM)do
+        if([PROCESS_TABLE + (i * 16) + 4] == WAIT_FILE && [PROCESS_TABLE + (i * 16) + 5] == inodeIndex)then
+            [PROCESS_TABLE + (i * 16) + 4] = READY;
+            [PROCESS_TABLE + (i * 16) + 5] = -1;
+        endif;
+        i = i + 1;
+    endwhile;
+
+    R0 = 0;
+    return;
+endif;
+
+
+//Acquire semaphore (6)
+if(functionNum == ACQUIRE_SEMAPHORE)then
+    alias i R3;
+    i = 0;
+    while(i < MAX_SEM_COUNT)do
+        if([SEMAPHORE_TABLE + 4*i + 1] == 0)then
+            break;
+        endif;
+        i = i + 1;
+    endwhile;
+
+    if(i == MAX_SEM_COUNT)then
+        R0 = -1;
+        return;
+    endif;
+
+    [SEMAPHORE_TABLE + 4*i + 0] = -1;         //LOCKING_PID set to -1.
+    [SEMAPHORE_TABLE + 4*i + 1] =  1;         //PROCESS_COUNT set to 1.
+
+    R0 = i;
+    return;
+endif;
+
+
+//Release semaphore (7)
+if(functionNum == RELEASE_SEMAPHORE)then
+    alias semIndex R3;
+
+    if([SEMAPHORE_TABLE + 4 * semIndex + 0] == currentPID)then
+        [SEMAPHORE_TABLE + 4 * semIndex + 0] = -1;            //LOCKING_PID set to -1. (Unlock Semaphore)
+    endif;
+
+    alias i R4;
+    i = 0;
+    while(i < MAX_PROC_NUM)do
+        if([PROCESS_TABLE + (i * 16) + 4] == WAIT_SEMAPHORE && [PROCESS_TABLE + (i * 16) + 5] == semIndex)then
+            [PROCESS_TABLE + (i * 16) + 4] = READY;
+            [PROCESS_TABLE + (i * 16) + 5] = -1;
+        endif;
+        i = i + 1;
+    endwhile;
+
+    [SEMAPHORE_TABLE + 4 * semIndex + 1] = [SEMAPHORE_TABLE + 4 * semIndex + 1] - 1;        //Decrement the process count
+    return;
+endif;
+
+//Terminal acquire
+if(functionNum == 8)then
+
+
+    while([TERMINAL_STATUS_TABLE+0] == 1)do     //do till we get terminal
+        [PROCESS_TABLE + (currentPID * 16) + 4] = WAIT_TERMINAL;
+        multipush(R1,R2);
+        call SCHEDULER;
+        multipop(R1,R2);
+    endwhile;
+
+    [TERMINAL_STATUS_TABLE + 0] = 1;
+    [TERMINAL_STATUS_TABLE + 1] = currentPID;
+    return;
+endif;
+
+
+
+
+
+//terminal release
+if(functionNum == 9)then
+    if(currentPID != [TERMINAL_STATUS_TABLE + 1])then
+        R0 = -1;
+        return;
+    endif;
+
+    [TERMINAL_STATUS_TABLE + 0] = 0;
+
+
+    alias i R3;
+    i = 0;
+    while(i<16)do
+        if([PROCESS_TABLE+i*16+4]==WAIT_TERMINAL)then
+            [PROCESS_TABLE+i*16+4]=READY;
+        endif;
+        i=i+1;
+    endwhile;
+
+    R0 = 0;
+    return;
+
+else 
+    R0 = -1;
+    return;
+
+endif;
+
+

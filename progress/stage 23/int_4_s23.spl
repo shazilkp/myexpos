@@ -1,0 +1,173 @@
+alias currentPID R10;
+alias syscall    R11;
+alias userSP     R12;
+alias i          R13;
+alias filename   R14;
+alias retValAddr R15;
+alias arg1       R9;
+alias arg2       R8;
+alias temp1      R6;
+alias temp2      R7;
+
+currentPID = [SYSTEM_STATUS_TABLE + 1];
+userSP = SP;
+[PROCESS_TABLE + currentPID*16 + 13] = SP;
+SP = [PROCESS_TABLE + currentPID*16 + 11]*512 - 1;
+
+//extract syscall - userSP-5
+temp1 = [PTBR + 2*((userSP-5)/512)];
+syscall = [temp1*512 + (userSP-5)%512];
+
+//pre-translate all stack addresses
+//arg1 addr = userSP-4
+temp1 = [PTBR + 2*((userSP-4)/512)];
+filename = temp1*512 + (userSP-4)%512;      //reuse as addr first
+
+//arg2 addr = userSP-3  
+temp2 = [PTBR + 2*((userSP-3)/512)];
+arg1 = temp2*512 + (userSP-3)%512;          //permission addr
+
+//retval addr = userSP-1
+temp1 = [PTBR + 2*((userSP-1)/512)];
+retValAddr = temp1*512 + (userSP-1)%512;
+
+//now read actual values
+temp1 = filename;                           //save filename addr
+filename = [temp1];                         //read filename value
+arg2 = [arg1];                              //read permission into arg2 temporarily
+
+if(syscall == INT_CREATE) then
+    [PROCESS_TABLE + currentPID*16 + 9] = INT_CREATE;
+    arg1 = arg2;                            //permission
+
+    i = 0;
+    while(i < MAX_FILE_NUM) do
+        if([INODE_TABLE + i*16 + 1] == filename) then
+            [retValAddr] = 0;
+            goto CREATE_DONE;
+        endif;
+        i = i + 1;
+    endwhile;
+
+    i = 0;
+    while(i < MAX_FILE_NUM) do
+        if([INODE_TABLE + i*16 + 1] == -1) then
+            break;
+        endif;
+        i = i + 1;
+    endwhile;
+
+    if(i == MAX_FILE_NUM) then
+        [retValAddr] = -1;                                          //max no of files reached
+        goto CREATE_DONE;
+    endif;
+
+    [INODE_TABLE + i*16 + 0]  = DATA;                              //type
+    [INODE_TABLE + i*16 + 1]  = filename;                          //filename
+    [INODE_TABLE + i*16 + 2]  = 0;                                 //size
+    [INODE_TABLE + i*16 + 3]  = [PROCESS_TABLE + 16*currentPID+3]; //USERID
+    [INODE_TABLE + i*16 + 4]  = arg1;                              //permission
+    [INODE_TABLE + i*16 + 8]  = -1;                                //data block 1
+    [INODE_TABLE + i*16 + 9]  = -1;                                //data block 2
+    [INODE_TABLE + i*16 + 10] = -1;                                //data block 3
+    [INODE_TABLE + i*16 + 11] = -1;                                //data block 4
+    [ROOT_FILE + i*8 + 0] = filename;                              //filename
+    [ROOT_FILE + i*8 + 1] = 0;                                     //file size
+    [ROOT_FILE + i*8 + 2] = DATA;                                  //file type
+    temp1 = [PROCESS_TABLE + 16*currentPID + 3];
+    [ROOT_FILE + i*8 + 3] = [USER_TABLE + 2*temp1];                //username from user table
+    [retValAddr] = 0;                                               //return value set to 0
+
+    CREATE_DONE:
+    [PROCESS_TABLE + currentPID*16 + 9] = 0;
+    goto RETURN;
+endif;
+
+if(syscall == INT_DELETE) then
+    [PROCESS_TABLE + currentPID*16 + 9] = INT_DELETE;
+    // filename and retValAddr already set above
+
+    i = 0;
+    while(i < MAX_FILE_NUM) do
+        if([INODE_TABLE + i*16 + 1] == filename) then
+            break;
+        endif;
+        i = i + 1;
+    endwhile;
+
+    if(i == MAX_FILE_NUM) then
+        [retValAddr] = 0;               //file not found
+        goto DELETE_DONE;
+    endif;
+
+    if([INODE_TABLE + i*16 + 0] != DATA) then
+        [retValAddr] = -1;              //not a DATA file
+        goto DELETE_DONE;
+    endif;
+
+    if([INODE_TABLE + i*16 + 4] == EXCLUSIVE) then
+        temp1 = [PROCESS_TABLE + 16*currentPID + 3];
+        temp2 = [INODE_TABLE + i*16 + 3];
+        if(temp1 != 1 && temp2 != [SYSTEM_STATUS_TABLE + 0]) then
+            [retValAddr] = -1;          //permission denied
+            goto DELETE_DONE;
+        endif;
+    endif;
+
+    multipush(R6,R7,R8,R9,R10,R11,R12,R13,R14,R15);
+        R1 = ACQUIRE_INODE;
+        R2 = i;
+        R3 = currentPID;
+        call RESOURCE_MANAGER;
+    multipop(R6,R7,R8,R9,R10,R11,R12,R13,R14,R15);
+
+    breakpoint;
+    if([FILE_STATUS_TABLE + i*4 + 1] != -1) then
+        multipush(R6,R7,R8,R9,R10,R11,R12,R13,R14,R15);
+            R1 = RELEASE_INODE;
+            R2 = i;
+            R3 = currentPID;
+            call RESOURCE_MANAGER;
+        multipop(R6,R7,R8,R9,R10,R11,R12,R13,R14,R15);
+        [retValAddr] = -2;              //file is open
+        goto DELETE_DONE;
+    endif;
+
+    arg2 = 0;                           //j
+    while(arg2 < 4) do
+        arg1 = [INODE_TABLE + i*16 + 8 + arg2];    //blockNo
+        if(arg1 != -1) then
+            temp1 = arg1 % 4;
+            if([BUFFER_TABLE + temp1] == arg1 && [BUFFER_TABLE + temp1 + 1] == 1) then
+                [BUFFER_TABLE + temp1 + 1] = 0;     //clear dirty bit
+            endif;
+            multipush(R6,R7,R8,R9,R10,R11,R12,R13,R14,R15);
+                R1 = RELEASE_BLOCK;
+                R2 = arg1;
+                R3 = currentPID;
+                call MEMORY_MANAGER;
+            multipop(R6,R7,R8,R9,R10,R11,R12,R13,R14,R15);
+        endif;
+        arg2 = arg2 + 1;
+    endwhile;
+
+    [INODE_TABLE + i*16 + 1] = -1;     //invalidate inode entry
+    [ROOT_FILE + i*8 + 0]    = -1;     //invalidate root file entry
+
+    multipush(R6,R7,R8,R9,R10,R11,R12,R13,R14,R15);
+        R1 = RELEASE_INODE;
+        R2 = i;
+        R3 = currentPID;
+        call RESOURCE_MANAGER;
+    multipop(R6,R7,R8,R9,R10,R11,R12,R13,R14,R15);
+
+    [retValAddr] = 0;                   //return 0 on success
+
+    DELETE_DONE:
+    [PROCESS_TABLE + currentPID*16 + 9] = 0;
+    goto RETURN;
+endif;
+
+RETURN:
+SP = userSP;
+ireturn;
