@@ -159,7 +159,7 @@ while(i < 16) do
     i = i + 1;
 endwhile;
 
-
+breakpoint;
 
 
 alias stk1 R3;
@@ -177,7 +177,7 @@ while(i < 512) do
     i = i + 1;
 endwhile;
 
-
+breakpoint;
 
 
 

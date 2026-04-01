@@ -1,0 +1,55 @@
+alias userSP R1;
+userSP = SP;
+
+alias currentPID R2;
+currentPID = [SYSTEM_STATUS_TABLE + 1];
+
+SP = [PROCESS_TABLE + 16 * currentPID + 11] * 512 - 1 ;
+
+[PROCESS_TABLE + 16 * currentPID + 9] = INT_SHUTDOWN;        // syscall = 21
+
+
+if (currentPID != 1 && [PROCESS_TABLE + (16 * currentPID) + 3] != 1) then       //If the current process is not shell or the current user is not root user 
+
+    [[PTBR + 2 * (userSP - 1) /512]* 512 + ((userSP - 1) % 512)] = 0;          //return 0 when file not found
+    [PROCESS_TABLE + (currentPID * 16) + 9] = 0;
+    SP = [PROCESS_TABLE + ( currentPID * 16) + 13];
+    ireturn;      
+endif;                                                                                                   
+    
+//inode  table and user table storing to disk
+multipush(R1,R2);
+    R1 = DISK_STORE;
+    R2 = currentPID;
+    R3 = 59;
+    R4 = 3;
+    call DEVICE_MANAGER;
+multipop(R1,R2);
+
+multipush(R1,R2);
+    R1 = DISK_STORE;
+    R2 = currentPID;
+    R3 = 60;
+    R4 = 4;
+    call DEVICE_MANAGER;
+multipop(R1,R2);
+
+//root file
+multipush(R1,R2);
+    R1 = DISK_STORE;
+    R2 = currentPID;
+    R3 = 62;
+    R4 = 5;
+    call DEVICE_MANAGER;
+multipop(R1,R2);
+
+//disk free list
+multipush(R1,R2);
+    R1 = DISK_STORE;
+    R2 = currentPID;
+    R3 = 61;
+    R4 = 2;
+    call DEVICE_MANAGER;
+multipop(R1,R2);
+
+halt;

@@ -1,0 +1,24 @@
+int main()
+{
+	decl
+        str filename;
+		int permission, temp;
+	enddecl
+
+	begin
+		temp = exposcall("Write",-2,"Enter file:");
+		temp = exposcall("Read",-1,filename);
+        temp = exposcall("Write",-2,"Deleting..");
+        temp = exposcall("Delete",filename);
+        if(temp == -1) then
+            temp = exposcall("Write",-2,"P Denied");
+        else
+            if(temp == -2) then
+                temp = exposcall("Write",-2,"F Open");
+            else
+                temp = exposcall("Write",-2,"Done");
+            endif;
+        endif;
+		return 0;
+	end
+}

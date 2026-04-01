@@ -1,0 +1,246 @@
+
+//load library code into 63 and 64 pages
+//this will be page 0 and 1 of our process
+loadi(63,13);
+loadi(64,14);
+
+//load the init program
+loadi(65,7);
+loadi(66,8);
+
+//load int 10 handler
+loadi(22,35);
+loadi(23,36);
+
+//loading exception handler
+loadi(2, 15);
+loadi(3, 16);
+
+//load the timer interupt
+loadi(4, 17);
+loadi(5, 18);
+
+//load int7 handler
+loadi(16,29);
+loadi(17,30);
+
+
+//load module 5 - scheduler
+loadi(50,63);
+loadi(51,64);
+
+//load the even program
+loadi(83,69);
+
+
+//load module 0 - resource allocater
+loadi(40,53);
+loadi(41,54);
+
+//load module 4 - device manager module
+loadi(48,61);
+loadi(49,62);
+
+
+//s16
+//load the console interrupt
+loadi(8,21);
+loadi(9,22);
+
+//load int6 handler
+loadi(14,27);
+loadi(15,28);
+
+
+//s17
+//int 9 handler
+loadi(20,33);
+loadi(21,34);
+
+//load module 1 - process manager module
+loadi(42,55);
+loadi(43,56);
+
+//load module 2 - memory manager module
+loadi(44,57);
+loadi(45,58);
+
+//inode table+user table
+loadi(59,3);
+loadi(60,4);
+
+
+//s18
+//load the disk interrupt
+loadi(6,19);
+loadi(7,20);
+
+
+//s19
+//Disk Free List
+loadi(61, 2);
+
+
+//s20
+//load int 8 handler
+loadi(18,31);
+loadi(19,32);
+
+//s21
+//load int 11 handler
+loadi(24,37);
+loadi(25,38);
+
+//load int 15 handler
+loadi(32,45);
+loadi(33,46);
+
+
+//s22
+//load in 13 handler
+loadi(28,41);
+loadi(29,42);
+
+//load in 14 handler
+loadi(30,43);
+loadi(31,44);
+
+//s23
+//load int 4 handler
+loadi(10, 23);
+loadi(11, 24);
+
+//load Root file
+loadi(62, 5);
+
+//setiing up ptbr of init program
+PTBR = PAGE_TABLE_BASE+20;
+PTLR = 10;
+
+//library
+[PTBR + 0] = 63;
+[PTBR + 1] = "0100";
+[PTBR + 2] = 64;
+[PTBR + 3] = "0100";
+
+//heap
+[PTBR + 4] = 78;
+[PTBR + 5] = "0110";
+[PTBR + 6] = 79;
+[PTBR + 7] = "0110";
+
+
+//code
+[PTBR+8] = 65;  // Logical page 4 
+[PTBR+9] = "0100";
+[PTBR+10] = 66;  // Logical page 5 
+[PTBR+11] = "0100"; 
+
+[PTBR+12] = -1;  // Logical page 6 unused
+[PTBR+13] = "0000"; 
+[PTBR+14] = -1;  // Logical page 7 unused
+[PTBR+15] = "0000"; 
+
+//stack
+[PTBR+16] = 76;  // Logical page 8 
+[PTBR+17] = "0110";
+
+[PTBR+18] = 77;  // Logical page 89
+[PTBR+19] = "0110";
+
+
+//Process Table for INIT
+[PROCESS_TABLE + 16 + 11] = 80;  //User Area Page Number
+[PROCESS_TABLE + 16 + 1] = 1; //PID
+[PROCESS_TABLE + 16 + 3] = 1; //UserID
+[PROCESS_TABLE + 16 + 4] = CREATED; //State
+[PROCESS_TABLE + 16 + 13] = 8*512; //UPTR
+[PROCESS_TABLE + 16+ 12] = 0; //KPTR
+[PROCESS_TABLE + 16 + 14] = PAGE_TABLE_BASE + 20; //PTBR
+[PROCESS_TABLE + 16 + 15 ] = 10; //PTLR
+
+[76*512] = [65*512 + 1];
+[TERMINAL_STATUS_TABLE] = 0;
+
+
+
+alias i R0;
+i=2;
+while(i<=15) do
+    [PROCESS_TABLE + i*16 + 4] = TERMINATED; //State
+    i = i+1;
+endwhile;
+
+i=0;
+while(i<=82)do
+	[MEMORY_FREE_LIST+i]=1;
+	i=i+1;
+endwhile;
+while(i<=127)do
+	[MEMORY_FREE_LIST+i]=0;
+	i=i+1;
+endwhile;
+
+//pages till 82 used for initialisation(starting from 76 till 127)
+//83 to 127
+[SYSTEM_STATUS_TABLE + 2] = 45;     //mem free count
+
+[SYSTEM_STATUS_TABLE + 3] = 0;  //mem wait
+
+
+
+//disk status
+[DISK_STATUS_TABLE + 0] = 0;
+
+
+
+alias UAPN R5;
+
+//fill the last 16 words(8 entries) of the uapn(as the per process resource table with -1)
+UAPN = [PROCESS_TABLE + (1 * 16) + 11];
+i = 1;
+while(i < 9) do
+    [((UAPN + 1)* 512) - (2*i) ]=-1;
+    i = i +1;
+endwhile;
+
+
+i = 0;
+while(i < MAX_SEM_COUNT) do
+    [SEMAPHORE_TABLE + 4*i + 0] = -1;   // LOCKING_PID = -1
+    [SEMAPHORE_TABLE + 4*i + 1] = 0;    // PROCESS_COUNT = 0
+    i = i + 1;
+endwhile;
+
+//file status table
+i = 0;
+while (i < MAX_FILE_NUM) do
+    [FILE_STATUS_TABLE + (i * 4) + 0] = -1;
+    [FILE_STATUS_TABLE + (i * 4) + 1] = -1;
+    i = i + 1;
+endwhile;
+
+i = 0;
+while (i < MAX_BUFFER) do
+    [BUFFER_TABLE + (i * 4) + 0] = -1;      //block number
+    [BUFFER_TABLE + (i * 4) + 1] = 0;       //dirty bit
+    [BUFFER_TABLE + (i * 4) + 2] = -1;      //locking PID
+    i = i + 1;
+endwhile;
+
+[DISK_MAP_TABLE + 10*1 + 2] = -1;
+[DISK_MAP_TABLE + 10*1 + 3] = -1;
+[DISK_MAP_TABLE + 10*1 + 4] = 7;
+[DISK_MAP_TABLE + 10*1 + 5] = 8;
+[DISK_MAP_TABLE + 10*1 + 6] = -1;
+[DISK_MAP_TABLE + 10*1 + 7] = -1;
+[DISK_MAP_TABLE + 10*1 + 8] = -1;
+[DISK_MAP_TABLE + 10*1 + 9] = -1;
+
+
+// init minMemUsage, diskAccessCount, contextSwitchCount
+[MIN_MEM_USAGE] = 45;
+[DISK_ACCESS_COUNT] = 0;
+[CONTEXT_SWITCH_COUNT] = 0;
+
+return;
