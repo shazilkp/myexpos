@@ -52,7 +52,7 @@ if(functionNum == RELEASE_INODE)then
         return; 
     endif;
 
-    [INODE_TABLE + inodeIndex * 16 + 1] = -1;       //FREE THE LOCK 
+    [FILE_STATUS_TABLE + inodeIndex * 4 + 0] = -1;       //FREE THE LOCK 
 
     alias i R4;
     i = 0;
@@ -164,3 +164,54 @@ else
 endif;
 
 
+//Acquire Buffer (1)
+if(functionNum == ACQUIRE_BUFFER)then
+    alias buffer_n R2;
+    alias PID R3;
+    alias pt_sst R4;
+    pt_sst = PROCESS_TABLE + PID*16;
+
+    //while buffer locked
+    while ([BUFFER_TABLE + buffer_n * 4 + 2] != -1) do
+        [pt_sst + 4] = WAIT_BUFFER;
+        [pt_sst + 5] = buffer_n;
+
+        multipush(R1,R2,R3,R4);
+		call SCHEDULER; //MOD 5
+		multipop(R1,R2,R3,R4);
+    endwhile;
+
+    //lock 
+
+    [BUFFER_TABLE + buffer_n * 4 + 2] = PID;
+    return;
+endif;
+
+//Release Buffer (2)
+if(functionNum == RELEASE_BUFFER)then
+    alias buffer_n R2;
+    alias PID R3;
+
+    //If PID given as input is not equal to the LOCKING PID in the Buffer Status Table, return -1.
+    if ([BUFFER_TABLE + buffer_n * 4 + 2] != PID) then
+        R0 = -1;
+        return;
+    endif;
+
+    //Free lock in buffer status table => set locking pid to -1
+    [BUFFER_TABLE + buffer_n * 4 + 2] = -1;
+
+    alias i R4;
+    i = 0;
+    while(i<16)do
+        if([PROCESS_TABLE+i*16+4] == WAIT_BUFFER && [PROCESS_TABLE+i*16+5] == buffer_n)then
+            [PROCESS_TABLE+i*16+4] = READY;
+            [PROCESS_TABLE+i*16+5] = -1;
+        endif;
+        i=i+1;
+    endwhile;
+
+    R0 = 0;
+    return;
+endif;
+return;
