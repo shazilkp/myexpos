@@ -1,0 +1,22 @@
+int main(){
+    decl
+        int a,fd,temp;
+        str data;
+    enddecl
+    begin
+        fd = exposcall("Open","root");
+        a = exposcall("Seek",fd,0);
+		while(a != -2) do
+			temp = exposcall("Read",fd,data);
+            if(data == "-1") then
+                break;
+            endif;
+			temp = exposcall("Write",-2,data);
+			a = exposcall("Seek",fd,7);
+		endwhile;
+
+        temp = exposcall("Close",fd);
+		
+        return 0;
+    end
+}

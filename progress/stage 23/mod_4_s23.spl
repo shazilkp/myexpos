@@ -1,122 +1,216 @@
-//device manager
+//resource manager
 
 alias functionNum R1;
 alias currentPID R2;
 
 
-//disk store(1)
-if(functionNum == DISK_STORE)then
-    alias pageNo R3;
-    alias blockNo R4;
-    multipush(R1,R2,R3,R4);
-        R1 = 3;     //function number of Acquire Disk in resource manager module
-        R2 = [SYSTEM_STATUS_TABLE + 1];
 
-        call MOD_0;
-        //ignore r0 return value
-    multipop(R1,R2,R3,R4);
+//Acquire Buffer (1)
+if(functionNum == ACQUIRE_BUFFER)then
+    alias buffer_n R2;
+    alias PID R3;
+    alias pt_sst R4;
+    pt_sst = PROCESS_TABLE + PID*16;
 
+    //while buffer locked
+    while ([BUFFER_TABLE + buffer_n * 4 + 2] != -1) do
+        [pt_sst + 4] = WAIT_BUFFER;
+        [pt_sst + 5] = buffer_n;
 
+        multipush(R1,R2,R3,R4);
+		call SCHEDULER; //MOD 5
+		multipop(R1,R2,R3,R4);
+    endwhile;
 
-    [DISK_STATUS_TABLE + 1] = 1;    //load/store bit = store
-    [DISK_STATUS_TABLE + 2] = pageNo; //pagenumber set
-    [DISK_STATUS_TABLE + 3] = blockNo; //blocknumber set
+    //lock 
 
-    store(pageNo,blockNo);
-
-    [PROCESS_TABLE + (16 * currentPID) + 4] = WAIT_DISK;
-
-    //scheduler
-    multipush(R1,R2,R3,R4);       
-    call SCHEDULER;
-    multipop(R1,R2,R3,R4);
-
+    [BUFFER_TABLE + buffer_n * 4 + 2] = PID;
     return;
 endif;
 
-//disk load
-if(functionNum == 2)then
-    alias pageNo R3;
-    alias blockNo R4;
-    multipush(R1,R2,R3,R4);
+//Release Buffer (2)
+if(functionNum == RELEASE_BUFFER)then
+    alias buffer_n R2;
+    alias PID R3;
 
-    R1 = 3;     //function number of Acquire Disk in resource manager module
-    R2 = [SYSTEM_STATUS_TABLE + 1];
+    //If PID given as input is not equal to the LOCKING PID in the Buffer Status Table, return -1.
+    if ([BUFFER_TABLE + buffer_n * 4 + 2] != PID) then
+        R0 = -1;
+        return;
+    endif;
 
-    call MOD_0;
+    //Free lock in buffer status table => set locking pid to -1
+    [BUFFER_TABLE + buffer_n * 4 + 2] = -1;
 
-    //ignore r0 return value
+    alias i R4;
+    i = 0;
+    while(i<16)do
+        if([PROCESS_TABLE+i*16+4] == WAIT_BUFFER && [PROCESS_TABLE+i*16+5] == buffer_n)then
+            [PROCESS_TABLE+i*16+4] = READY;
+            [PROCESS_TABLE+i*16+5] = -1;
+        endif;
+        i=i+1;
+    endwhile;
 
-    multipop(R1,R2,R3,R4);
-
-    [DISK_STATUS_TABLE + 1] = 0;    //load/store bit = load
-    [DISK_STATUS_TABLE + 2] = pageNo; //pagenumber set
-    [DISK_STATUS_TABLE + 3] = blockNo; //blocknumber set
-
-    load(pageNo,blockNo);
-
-    [PROCESS_TABLE + (16 * currentPID) + 4] = WAIT_DISK;
-
-    //terminal release
-    multipush(R1,R2,R3,R4);       //i dont wanna save whats in R3, or is it convention? like og program should get back whatever its sets?
-    call SCHEDULER;
-    multipop(R1,R2,R3,R4);
-
+    R0 = 0;
     return;
-
-
 endif;
 
+
+//Acquire Disk
 if(functionNum == 3)then
-    multipush(R1,R2,R3);
-    R1 = 8;     //function number of terminal acquire in resource manager module
-    R2 = [SYSTEM_STATUS_TABLE + 1];
+    while([DISK_STATUS_TABLE+0] == 1)do     //do till we get terminal
+        [PROCESS_TABLE + (currentPID * 16) + 4] = WAIT_DISK;
+        multipush(R1,R2);
+        call SCHEDULER;
+        multipop(R1,R2);
+    endwhile;
 
-    call MOD_0;
-
-    //ignore r0 return value
-
-    multipop(R1,R2,R3);
-
-    print(R3);
-
-    //terminal release
-    multipush(R1,R2);       //i dont wanna save whats in R3, or is it convention? like og program should get back whatever its sets?
-    R1 = 9;
-    R2 = [SYSTEM_STATUS_TABLE + 1];
-
-    call MOD_0;
-    multipop(R1,R2);
-
+    [DISK_STATUS_TABLE + 0] = 1;
+    [DISK_STATUS_TABLE + 4] = currentPID;
     return;
-
-
 endif;
 
-if(functionNum == 4)then
-    multipush(R1,R2,R3);
-    R1 = 8;     //function number of terminal acquire in resource manager module
-    R2 = currentPID;
+//Acquire Inode(3)
+if(functionNum == ACQUIRE_INODE)then
+    alias inodeIndex R2;
+    alias PID R3;
+    while([FILE_STATUS_TABLE + inodeIndex * 4 + 0] != -1)do     //do till we get file
+        [PROCESS_TABLE + (PID * 16) + 4] = WAIT_FILE;
+        [PROCESS_TABLE + (PID * 16) + 5] = inodeIndex;
+        multipush(R1,R2,R3);
+        call SCHEDULER;
+        multipop(R1,R2,R3);
+    endwhile;
 
-    call MOD_0;
 
-    //ignore r0 return value
+    if ([INODE_TABLE + inodeIndex * 16 + 1] == -1) then
+        R0 = -1;
+        return;
+    endif;
 
-    multipop(R1,R2,R3);
-
-    read;
-
-
-    // we dont release the terminal like we have done for write, we call read andd set as wait_terminal and call schedular, this gets
-    // reinvoked when the console interrupt tiggers
-
-    [PROCESS_TABLE + 16*currentPID + 4] = WAIT_TERMINAL;
-    multipush(R1,R2,R3);
-
-    call SCHEDULER;
-
-    multipop(R1,R2,R3);
-
-    [[PAGE_TABLE_BASE + 20*currentPID +2*(R3/512)]*512 + (R3%512)]=[PROCESS_TABLE+ 16*currentPID + 8];
+    [FILE_STATUS_TABLE + inodeIndex * 4 + 0] = PID;
+    R0 = 0;
     return;
+endif;
+
+//Release Inode(4)
+if(functionNum == RELEASE_INODE)then
+    alias inodeIndex R2;
+    alias PID R3;
+
+    if([FILE_STATUS_TABLE + inodeIndex * 4 + 0] != PID)then
+        R0 = -1;
+        return; 
+    endif;
+
+    [FILE_STATUS_TABLE + inodeIndex * 4 + 0] = -1;       //FREE THE LOCK 
+
+    alias i R4;
+    i = 0;
+    while(i < MAX_PROC_NUM)do
+        if([PROCESS_TABLE + (i * 16) + 4] == WAIT_FILE && [PROCESS_TABLE + (i * 16) + 5] == inodeIndex)then
+            [PROCESS_TABLE + (i * 16) + 4] = READY;
+            [PROCESS_TABLE + (i * 16) + 5] = -1;
+        endif;
+        i = i + 1;
+    endwhile;
+
+    R0 = 0;
+    return;
+endif;
+
+
+//Acquire semaphore (6)
+if(functionNum == ACQUIRE_SEMAPHORE)then
+    alias i R3;
+    i = 0;
+    while(i < MAX_SEM_COUNT)do
+        if([SEMAPHORE_TABLE + 4*i + 1] == 0)then
+            break;
+        endif;
+        i = i + 1;
+    endwhile;
+
+    if(i == MAX_SEM_COUNT)then
+        R0 = -1;
+        return;
+    endif;
+
+    [SEMAPHORE_TABLE + 4*i + 0] = -1;         //LOCKING_PID set to -1.
+    [SEMAPHORE_TABLE + 4*i + 1] =  1;         //PROCESS_COUNT set to 1.
+
+    R0 = i;
+    return;
+endif;
+
+
+//Release semaphore (7)
+if(functionNum == RELEASE_SEMAPHORE)then
+    alias semIndex R3;
+
+    if([SEMAPHORE_TABLE + 4 * semIndex + 0] == currentPID)then
+        [SEMAPHORE_TABLE + 4 * semIndex + 0] = -1;            //LOCKING_PID set to -1. (Unlock Semaphore)
+    endif;
+
+    alias i R4;
+    i = 0;
+    while(i < MAX_PROC_NUM)do
+        if([PROCESS_TABLE + (i * 16) + 4] == WAIT_SEMAPHORE && [PROCESS_TABLE + (i * 16) + 5] == semIndex)then
+            [PROCESS_TABLE + (i * 16) + 4] = READY;
+            [PROCESS_TABLE + (i * 16) + 5] = -1;
+        endif;
+        i = i + 1;
+    endwhile;
+
+    [SEMAPHORE_TABLE + 4 * semIndex + 1] = [SEMAPHORE_TABLE + 4 * semIndex + 1] - 1;        //Decrement the process count
+    return;
+endif;
+
+//Terminal acquire
+if(functionNum == 8)then
+
+
+    while([TERMINAL_STATUS_TABLE+0] == 1)do     //do till we get terminal
+        [PROCESS_TABLE + (currentPID * 16) + 4] = WAIT_TERMINAL;
+        multipush(R1,R2);
+        call SCHEDULER;
+        multipop(R1,R2);
+    endwhile;
+
+    [TERMINAL_STATUS_TABLE + 0] = 1;
+    [TERMINAL_STATUS_TABLE + 1] = currentPID;
+    return;
+endif;
+
+
+
+
+
+//terminal release
+if(functionNum == 9)then
+    if(currentPID != [TERMINAL_STATUS_TABLE + 1])then
+        R0 = -1;
+        return;
+    endif;
+
+    [TERMINAL_STATUS_TABLE + 0] = 0;
+
+
+    alias i R3;
+    i = 0;
+    while(i<16)do
+        if([PROCESS_TABLE+i*16+4]==WAIT_TERMINAL)then
+            [PROCESS_TABLE+i*16+4]=READY;
+        endif;
+        i=i+1;
+    endwhile;
+
+    R0 = 0;
+    return;
+
+else 
+    R0 = -1;
+    return;
+
 endif;

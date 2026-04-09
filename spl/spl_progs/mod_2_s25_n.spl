@@ -1,0 +1,127 @@
+//Memory Manager Module
+//1. According to the function number value present in R1, implement different functions in module 2.
+alias fnno R1;
+
+//2. If the function number corresponds to Get Free Page, follow steps below
+//GET FREE PAGE -- fnno:1
+if(fnno==1) then 
+        //i) Increment WAIT_MEM_COUNT field in the system status table. //Do not increment the WAIT_MEM_COUNT in busy loop (an important step )
+    [SYSTEM_STATUS_TABLE+3]=[SYSTEM_STATUS_TABLE+3]+1;
+        
+        //ii) While memory is full (MEM_FREE_COUNT will be 0), do following.
+        //    Set the state of the invoked process as WAIT_MEM.
+        //    Schedule other process by invoking the context switch module. // blocking the process
+    while([SYSTEM_STATUS_TABLE+2]==0) do
+        [PROCESS_TABLE+16*[SYSTEM_STATUS_TABLE+1]+4]=WAIT_MEM;
+        multipush(R1);
+        call MOD_5;//scheduler
+        multipop(R1);
+    endwhile;
+        
+        //iii) Decrement the WAIT_MEM_COUNT field and MEM_FREE_COUNT field in the system status table.
+        /// /* Note the sequence - increment WAIT_MEM_COUNT, waiting for the memory, decrement WAIT_MEM_COUNT.*/
+    [SYSTEM_STATUS_TABLE+3]=[SYSTEM_STATUS_TABLE+3]-1;
+    [SYSTEM_STATUS_TABLE+2]=[SYSTEM_STATUS_TABLE+2]-1;
+
+        //iv) Find a free page using memory free list and set the corresponding entry as 1. Make sure to store the obtained free page number in R0 as return value.
+    R2=57*512;
+    while([R2]!=0) do
+        R2=R2+1;
+    endwhile;
+    [R2]=1;
+    R0=R2-57*512; //page no of the free page
+
+        //v) Return to the caller
+    return;
+endif;
+
+//If the function number corresponds to Release Page, follow steps below
+//RELEASE PAGE -- fnno=2
+if(fnno==2) then
+    //i) The Page number to be released is present in R2. Decrement the corresponding entry in the memory free list.
+    alias pgno R2;
+    [57*512+pgno]=[57*512 + pgno]-1;
+    //ii) If that entry in the memory free list becomes zero, then the page is free. So increment the MEM_FREE_COUNT in the system status table.
+    if([57*512+pgno]==0) then
+        [SYSTEM_STATUS_TABLE+2]=[SYSTEM_STATUS_TABLE+2]+1;
+    endif;
+    //iii) Update the STATUS to READY for all processes (with valid PID) which have STATUS as WAIT_MEM.
+    R3=1;
+    while(R3<16) do
+        if([PROCESS_TABLE+R3*16+4]  == WAIT_MEM) then
+            [PROCESS_TABLE+R3*16+4] = READY;
+        endif;
+        R3=R3+1;
+    endwhile;
+    //iv)  Return to the caller
+    return;
+endif;
+
+//GET FREE BLOCK fn :3
+// loop through entries in the Disk Free List from DISK_FREE_AREA to DISK_SWAP_AREA - 1{   /* User Block, not preallocated to the OS or swap area */
+//     if ( a free entry is found ){
+//             Set the Disk Free List entry as 1;
+//             Return the corresponding block number;
+//     }
+// }
+// return -1;
+if(fnno == 3) then
+        alias blockno R2;
+        blockno = DISK_FREE_AREA;
+        while(blockno < DISK_SWAP_AREA) do
+            if([DISK_FREE_LIST+blockno] == 0) then
+                [DISK_FREE_LIST+blockno] = 1;
+                R0 = blockno;
+                return;
+            endif;
+            blockno = blockno + 1;
+        endwhile;
+        R0 = -1;
+        return;
+endif;
+
+
+//RELEASE BLOCK fn: 4
+if(fnno == 4)   then
+    [DISK_FREE_LIST+R2]=[DISK_FREE_LIST+R2]-1;
+    return;
+endif;
+
+//GET CODE PG fn: 5
+if(fnno==5) then
+    alias blockno R2;
+    R3=0;
+    while(R3<160)   do
+        if([R3+DISK_MAP_TABLE]==blockno)   then
+            R4=R3/10; //process id
+            R5=R3%10;  // to get the code block no
+            if([PAGE_TABLE_BASE+R4*20+R5*2]!=-1)    then
+                R0=[PAGE_TABLE_BASE+R4*20+R5*2];    //corresponding mem pg no from page table
+                [57*512 + R0]=[57*512 + R0]+1;
+                return;
+            endif;
+        endif;
+        R3=R3+1;
+    endwhile;
+
+    //else
+    multipush(R0,R1,R2);
+    R1=1;
+    call MOD_2;//get free pg fn in MEMORY MANAGER
+    R3=R0;//MEM pg no
+    multipop(R0,R1,R2);
+
+    multipush(R0,R1,R2,R3);
+    R4=blockno;//R2 value
+    R1=2;
+    R2=[SYSTEM_STATUS_TABLE+1];
+    R3=R3;
+    call MOD_4; //Disk Load fn in DEVICE MANAGER
+    multipop(R0,R1,R2,R3);
+
+    R0=R3;//returning pg no
+    
+    return;
+endif;
+
+return;

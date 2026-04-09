@@ -1,0 +1,258 @@
+// OPEN and CLOSE file system calls
+
+alias userSP R1;
+userSP = SP;
+
+//USER to KERNEL stack
+alias pcb R2;
+pcb =PROCESS_TABLE + 16*[SYSTEM_STATUS_TABLE+1];
+[pcb + 13] = SP;
+SP = [pcb+11]*512 - 1;
+
+//syscall 
+alias syscall R3;
+syscall = [[PTBR + ((userSP - 5)/512)*2]*512 + (userSP-5)%512];
+
+alias return_address R6;
+return_address= [PTBR + ((userSP-1)/512)*2]*512 + (userSP-1)%512;
+    
+//MODE FLAG
+[pcb + 9] = syscall;
+
+//OPEN file system call -- 2
+if(syscall == INT_OPEN) then
+
+    //find free per process resource table entry
+    R4 = [pcb+11]*512 + RESOURCE_TABLE_OFFSET;
+    R5 = ([pcb+11]+1)*512;
+    while(R4<R5) do
+        if([R4] == -1)  then
+            break;
+        endif;
+        R4 = R4 +2;
+    endwhile;
+
+    if(R4 == R5) then//no free entry
+        [return_address] = -3; //return -3
+        [pcb + 9] = 0;
+        SP =userSP;
+        ireturn;
+    endif;
+
+    alias file_desc R4;
+    alias file_name R5;
+
+    file_name = [[PTBR + ((userSP - 4)/512)*2]*512 + (userSP-4)%512];
+
+    //Call open function in 
+    //File manager module
+    multipush(R1,R2,R3,R4,R5,R6);
+    R1= OPEN;
+    R2 = file_name;
+    call FILE_MANAGER; // MOD 3
+    multipop(R1,R2,R3,R4,R5,R6);
+
+    //file not found(inode locking fails) OR file of type exec
+    if(R0 == -1) then // return -1
+        [return_address] = -1;
+        [pcb + 9] = 0;
+        SP =userSP;
+        ireturn;
+    endif;
+
+    //no free entry in Open File Table
+    //reached limit of max no of open files
+    if(R0 == -2) then //return -2
+        [return_address] = -2;
+        [pcb + 9] = 0;
+        SP =userSP;
+        ireturn;
+    endif;
+
+    //set per process table entry
+    [file_desc] = FILE;
+    [file_desc+1] = R0; //open file table entry
+
+    //mode flag
+    [pcb + 9] = 0;
+
+    //SP
+    SP=userSP;
+
+    //return index of per process resource table
+    [return_address] = (file_desc - ([pcb + 11]*512 + RESOURCE_TABLE_OFFSET))/2;
+    ireturn;
+endif;  
+
+if(syscall == INT_CLOSE) then
+    alias file_desc_pprt R4;
+    file_desc_pprt = [[PTBR + ((userSP - 4)/512)*2]*512 + (userSP-4)%512];
+
+    // If file descriptor is invalid, return -1.    /* File descriptor value should be within the range 0 to 7 (both included). */
+    if(file_desc_pprt < 0 || file_desc_pprt > 7) then
+        [pcb+9] = 0;
+        SP=userSP;
+        [return_address] = -1;
+        ireturn;
+    endif;
+
+    //Locate per process reource table of current process
+    alias pprt R5;
+    pprt = [pcb+11]*512 + RESOURCE_TABLE_OFFSET;
+
+    //If the Resource identifier field of the 
+    //Per Process Resource Table entry is invalid 
+    //or does not indicate a FILE, return -1.   
+    if([pprt + file_desc_pprt*2] != FILE) then //no open file
+        [pcb+9] = 0;
+        SP=userSP;
+        [return_address] = -1;
+        ireturn;
+    endif;
+
+    //Get index of open file table from per process reource table
+    alias open_file_table_i R7;
+    open_file_table_i=[pprt + file_desc_pprt*2 +1];
+
+    // Call the close() function in the 
+    // File Manager module with the 
+    //Open File Table index as arguement.
+    multipush(R1,R2,R3,R4,R5,R6,R7);
+    R1 = CLOSE;
+    R2 = open_file_table_i;
+    call FILE_MANAGER; //MOD 3
+    multipop(R1,R2,R3,R4,R5,R6,R7);
+
+    // Invalidate the Per-Process Resource Table entry.
+    [pprt] = -1;
+    [pprt+1] = -1;
+
+    // Set the MODE_FLAG in the process table entry to 0.
+    [pcb+9] =0 ;
+
+    // Switch back to the user stack.
+    SP = userSP;
+
+    // Return from system call with 0.
+    [return_address] = 0;
+
+    ireturn; 
+
+endif;
+
+//R1,R2,R3,R6
+if(syscall==INT_SEEK) then
+    alias file_desc R4;
+    alias offset R5;
+
+    file_desc= [[PTBR + ((userSP - 4)/512)*2]*512 + (userSP-4)%512];
+    offset =   [[PTBR + ((userSP - 3)/512)*2]*512 + (userSP-3)%512];
+
+    // If file descriptor is invalid, return -1.    /* File descriptor value should be within the range 0 to 7 (both included). */
+    if(file_desc< 0 || file_desc > 7) then
+        [pcb+9] = 0;
+        SP=userSP;
+        [return_address] = -1;
+        ireturn;
+    endif;
+
+    //Locate the Per-Process Resource Table of the current process.
+        //  Find the PID of the current process from the System Status Table.
+        //  Find the User Area page number from the Process Table entry.
+        //  The  Per-Process Resource Table is located at the  RESOURCE_TABLE_OFFSET from the base of the  User Area Page
+    alias pprt R7;
+    pprt = [pcb+11]*512 + RESOURCE_TABLE_OFFSET + file_desc*2;
+
+    //If entry in the Per Process Resource Table 
+    //corresponding to the file descriptor is invalid, return -1.   
+    ///* No file is open with this file descriptor. */
+    if([pprt] != FILE)then
+        [pcb+9] = 0;
+        SP=userSP;
+        [return_address] = -1;
+        ireturn;
+    endif;
+
+    //Get the index of the Open File Table entry from the Per Process Resource Table entry.
+    alias oft_start R8;
+    oft_start = OPEN_FILE_TABLE + [pprt+1]*4;
+
+    //Get the index of the Inode Table entry from the Open File Table entry
+    alias inode_i R9;
+    inode_i = [oft_start];
+
+    //Call the acquire_inode() function 
+    //in the Resource Manager module.   /* Lock the inode */
+    //If the locking fails, return -1. 
+    multipush(R1,R2,R3,R4,R5,R6,R7,R8,R9);
+    R1=ACQUIRE_INODE;
+    R2=inode_i;
+    R3= [SYSTEM_STATUS_TABLE+1];
+    call RESOURCE_MANAGER; //MOD 0
+    multipop(R1,R2,R3,R4,R5,R6,R7,R8,R9);
+
+    if(R0==-1) then
+        [pcb+9] = 0;
+        SP=userSP;
+        [return_address] = -1;
+        ireturn;
+    endif;
+
+    //lseek = [oft_start+2]
+    // Get the file size of the file from the Inode Table (Use 480 if inode index is "INODE_ROOT").
+    alias file_sz R10;
+    if(inode_i == INODE_ROOT) then
+        file_sz = 480;
+    else
+        file_sz= [INODE_TABLE + inode_i*16 + 2];
+    endif;
+
+    //Check validity of given offset
+    //If (lseek + the given offset) is less than 0, release_inode() and return -2.
+    if([oft_start+2] + offset < 0) then
+        multipush(R1,R2,R6);
+        R1= RELEASE_INODE;
+        R2= inode_i;
+        R3= [SYSTEM_STATUS_TABLE+1];
+        call RESOURCE_MANAGER; //MOD 0
+        multipop(R1,R2,R6);
+
+        [pcb+9] = 0;
+        SP=userSP;
+        [return_address] = -2;
+        ireturn;
+    endif;
+
+    // If the given offset is 0,
+    //     Set lseek value in the Open File Table entry to 0.
+    // else if lseek+offset is greater than the file size,
+    //     Set the lseek value to file size. /* Check inode table for file size */
+    // else
+    //     Change the lseek value in the Per-Process Resource Table entry to lseek+offset.
+
+    if(offset == 0) then
+        [oft_start+2] = 0;
+    else
+        if(offset + [oft_start+2] > file_sz) then
+            [oft_start+2] = file_sz;
+        else
+            [oft_start+2] = [oft_start+2]+offset;
+        endif;
+    endif;
+
+    //Call the release_inode() function in the Resource Manager module.   /* Free the inode */
+    multipush(R1,R2,R6);
+    R1= RELEASE_INODE;
+    R2= inode_i;
+    R3= [SYSTEM_STATUS_TABLE+1];
+    call RESOURCE_MANAGER; //MOD 0
+    multipop(R1,R2,R6);
+
+    [pcb+9] = 0; //mode
+    SP=userSP;
+    [return_address] =0;
+    ireturn;
+endif;
+
+
+ireturn;

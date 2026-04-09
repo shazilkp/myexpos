@@ -1,0 +1,221 @@
+//PROCESS MANAGER MODULE
+//1. According to the function number value present in R1, implement different functions in module 1.
+alias fnno R1;
+alias PID R2;
+
+//2.  If the function number corresponds to Free User Area Page, follow steps below
+//i)  Obtain the user area page number from the process table entry corresponding to the PID given as an argument.
+//ii)  Free the user area page by invoking the Release Page function.
+//iii) Return to the caller.
+
+///GET_PCB_ENTRY
+if(fnno == 1) then
+    R0=0;
+    while(R0<16) do
+        if([PROCESS_TABLE+R0*16 + 4] == TERMINATED) then
+            [PROCESS_TABLE+R0*16 + 1]=R0;//pid
+            [PROCESS_TABLE+R0*16 + 4]=ALLOCATED;//state
+            [PROCESS_TABLE+R0*16 + 14]=PAGE_TABLE_BASE+R0*20;//ptbr
+            [PROCESS_TABLE+R0*16 + 15]=10;//ptlr
+            return;
+        endif;
+        R0=R0+1;
+    endwhile;
+    R0=-1;
+    return;
+
+endif;
+
+//Free User Area page
+if(fnno==2) then
+    R4=[PROCESS_TABLE+PID*16+11]*512+RESOURCE_TABLE_OFFSET;
+    R5=[PROCESS_TABLE+PID*16+11]*512+512;
+    while(R4<R5) do
+        if([R4]==SEMAPHORE) then
+            multipush(R0,R1,R2,R3,R4,R5);
+            R3=PID;
+            R2=[R4+1];
+            R1=RELEASE_SEMAPHORE;
+            call RESOURCE_MANAGER;//Mod 0
+            multipop(R0,R1,R2,R3,R4,R5);
+        endif;
+        if([R4] == FILE) then
+            multipush(R0,R1,R2,R3,R4,R5);
+            R3 = PID;
+            R1 = CLOSE;
+            R2 = [R4+1];
+            call FILE_MANAGER; //MOD 3
+            multipop(R0,R1,R2,R3,R4,R5);
+        endif;
+        R4 = R4+2;
+    endwhile;
+    multipush(R1,R2);
+    R3=[PROCESS_TABLE+PID*16+11];
+    R1=2;
+    R2=R3;
+    call MOD_2; //Memory manager
+    //calls release page
+    multipop(R1,R2);
+    return;
+endif;
+
+//3. If the function number corresponds to Exit Process, follow steps below
+// i) Extract PID of the invoking process from the corresponding register.  
+//Exit Process
+if(fnno==3) then
+    if([PROCESS_TABLE+16*PID+9] !=9)  then // if not called from exec
+        //change state of waitiing processes to ready
+        R3 = PROCESS_TABLE;
+        R4 = PROCESS_TABLE + 15*16;
+        while(R3<=R4) do
+            if([R3 + 5] == PID  && [R3 + 4] == WAIT_PROCESS) then
+                [R3 + 4] = READY;
+                [R3 + 5] = -1;
+            endif;
+            R3 = R3 + 16;
+        endwhile;
+
+        //chnage ppid of child to -1
+        R3 = PROCESS_TABLE + 2;
+        R4 = PROCESS_TABLE + 15*16 +2;
+        while(R3<=R4) do
+            if([R3] == PID) then
+                [R3] = -1;
+            endif;
+            R3 = R3 + 16;
+        endwhile;
+    endif;
+
+
+    multipush(R1,R2);
+    // ii)Invoke the Free Page Table function with same PID to deallocate the page table entries.
+    R1=4;
+    call MOD_1;
+    // iii)Invoke the Free user Area Page function with the same PID to free the user area page.
+    R1=2;
+    call MOD_1;
+    multipop(R1,R2);
+    // iv) Set the state of the process as TERMINATED and return to the caller.
+    [PROCESS_TABLE+16*PID+4]=TERMINATED;
+    return;
+endif;
+
+//4. If the function number corresponds to Free Page Table, follow steps below
+
+//Free  Page Table
+if(fnno==4) then
+    //i)    Invalidate the page table entries for the library pages by setting page number as -1 and auxiliary data as "0000" for each entry.
+    [[PROCESS_TABLE + PID * 16 + 14] +0]=-1;
+    [[PROCESS_TABLE + PID * 16 + 14] +1]="0000";
+    [[PROCESS_TABLE + PID * 16 + 14] +2]=-1;
+    [[PROCESS_TABLE + PID * 16 + 14] +3]="0000";
+    //ii) For each valid entry in the page table, release the page by invoking the Release Page function and invalidate the entry.
+    R3=4;
+    R4=[PROCESS_TABLE + PID * 16 + 14];
+    while(R3<20) do
+        if([R4+R3]!=-1) then
+            multipush(R0,R1,R2,R3,R4);
+            R1=2;
+            R2=[R4+R3];
+            call MOD_2;//release pg fn from memory manager
+            multipop(R0,R1,R2,R3,R4);
+        endif;
+        [R4+R3+0]=-1;
+        [R4+R3+1]="0000";
+        R3=R3+2;
+    endwhile;
+
+    //heap and stack entries in disk map table of process
+    R4=2;
+    R5=PID;
+    while(R4<=3) do
+        if([DISK_MAP_TABLE+PID*10+R4]!=-1) then //heap
+            multipush(R0,R1,R2,R3,R4,R5);
+            R3=R5;
+            R1=4;
+            R2=[DISK_MAP_TABLE+R5*10+R4];
+            call MOD_2;//Release block fn in MEMORY MANAGER
+            multipop(R0,R1,R2,R3,R4,R5);
+        endif;
+        
+        if([DISK_MAP_TABLE+PID*10+R4+6]!=-1) then //stack
+            multipush(R0,R1,R2,R3,R4,R5);
+            R3=R5;
+            R1=4;
+            R2=[DISK_MAP_TABLE+R5*10+R4+6];
+            call MOD_2;//Release block fn in MEMORY MANAGER
+            multipop(R0,R1,R2,R3,R4,R5);
+        endif;
+        R4=R4+1;
+    endwhile;
+
+    R3=0;
+    while(R3<10) do
+        [DISK_MAP_TABLE+PID*10+R3]=-1;
+        R3=R3+1;
+    endwhile;
+    //iii)   Return to the Caller.
+    return;
+endif;
+
+//KILL_ALL -- fnno = 5
+if(fnno == KILL_ALL) then
+    // /* Lock all files to ensure that no processes are in the middle of a file operation */
+    // For each valid entry in the Inode table   
+    //     Acquire lock on the file by calling the acquire_inode() function in the Resource Manager module.
+    alias iter R3;
+    iter = 0;
+    while ( iter<MAX_FILE_NUM) do
+        if([INODE_TABLE + iter*16 +1] != -1) then
+            multipush(R1,R2,R3);
+            R1=ACQUIRE_INODE;
+            R2=iter;
+            R3=[SYSTEM_STATUS_TABLE + 1];
+            call RESOURCE_MANAGER; //MOD 0
+            multipop(R1,R2,R3);
+        endif;
+        iter=iter+1;
+    endwhile;
+
+
+    // For each pid from 2 to MAX_PROC_NUM - 1  /* PID 0 is idle and 1 is init */
+    
+    iter = 2;
+    while(iter < MAX_PROC_NUM) do
+
+        //     /* This code is relevant only when the Pager Module is implemented in Stage 27 */
+        //     If pid == PID of Swapper Daemon         /* Swapper Daemon must not be TERMINATED */
+        //         continue;
+
+
+        //     If pid != pid of the current process AND state of the process in the process table entry is not TERMINATED
+        if(iter!=PID && [PROCESS_TABLE + iter*16 + 4]!=TERMINATED) then
+            //     Call exit_process() function from the Process Manager Module.
+            multipush(R1,R2,R3);
+            R1 = EXIT_PROCESS;
+            R2 = iter;
+            call PROCESS_MANAGER; //MOD 1
+            multipop(R1,R2,R3);
+        endif;
+        iter = iter+1;
+    endwhile;
+
+    // For each valid entry in the Inode table
+    //     Release lock on the file by calling the release_inode() function in the Resource Manager module.
+    iter = 0;
+    while(iter < MAX_FILE_NUM) do
+        if([INODE_TABLE + iter*16 +1] != -1) then
+            multipush(R1,R2,R3);
+            R1=RELEASE_INODE;
+            R2=iter;
+            R3=[SYSTEM_STATUS_TABLE + 1];
+            call RESOURCE_MANAGER; //MOD 0
+            multipop(R1,R2,R3);
+        endif;
+        iter=iter+1;
+    endwhile;
+
+    return;
+endif;
+
+return;
