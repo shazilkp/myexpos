@@ -1,0 +1,149 @@
+//write system call
+alias pt_sst R2;
+pt_sst = PROCESS_TABLE + ([SYSTEM_STATUS_TABLE + 1] * 16);
+
+//mode flag (5)
+[pt_sst + 9] = INT_WRITE;
+
+//SP
+alias userSP R1;
+userSP = SP;
+
+//user to kernel stack
+[pt_sst + 13] = userSP;
+SP = [pt_sst + 11]*512 - 1;
+
+//arguments
+alias file_desc    R3;
+alias return_address R4;
+alias word_addr    R5;
+
+file_desc    = [[PTBR + 2*((userSP-4)/512)]*512 + (userSP-4)%512];
+return_address = [PTBR + 2*((userSP-1)/512)]*512 + (userSP-1)%512;
+word_addr    = [[PTBR + 2*((userSP-3)/512)]*512 + (userSP-3)%512];
+
+if(file_desc == -2) then
+    //write to terminal
+    multipush(R1,R2,R3,R4,R5);
+        R1 = TERMINAL_WRITE;
+        R2 = [SYSTEM_STATUS_TABLE + 1];
+        R3 = word_addr;
+        call DEVICE_MANAGER;
+    multipop(R1,R2,R3,R4,R5);
+    [return_address] = 0;
+    goto RETURN;
+endif;
+
+//validate file descriptor range
+if(file_desc < 0 || file_desc > 7) then
+    [return_address] = -1;
+    goto RETURN;
+endif;
+
+//locate per process resource table entry
+alias pprt R6;
+pprt = [pt_sst + 11]*512 + RESOURCE_TABLE_OFFSET + 2*file_desc;
+
+//check resource table entry is a FILE
+if([pprt] != FILE) then
+    [return_address] = -1;
+    goto RETURN;
+endif;
+
+//get open file table index
+alias oft_i    R7;
+alias oft_start R8;
+alias inode_i  R9;
+
+oft_i    = [pprt + 1];
+oft_start = OPEN_FILE_TABLE + oft_i*4;
+inode_i  = [oft_start];
+
+// If the current user is not root and the current user does not own the file and 		/* Check the process table entry */
+// the exclusive permission is set, return -3. 
+if([pt_sst + 3] != ROOT && [pt_sst + 3] != [INODE_TABLE + inode_i * 16 + 3] && [INODE_TABLE + inode_i * 16 + 4] == EXCLUSIVE )then
+    [return_address] = -3;
+endif;
+
+//acquire lock on inode
+multipush(R1,R2,R3,R4,R5,R6,R7,R8,R9);
+    R1 = ACQUIRE_INODE;
+    R2 = inode_i;
+    R3 = [SYSTEM_STATUS_TABLE + 1];
+    call RESOURCE_MANAGER;
+multipop(R1,R2,R3,R4,R5,R6,R7,R8,R9);
+
+if(R0 == -1) then
+    [return_address] = -1;
+    goto RETURN;
+endif;
+
+alias lseek R10;
+lseek = [oft_start + 2];
+
+if(lseek == MAX_FILE_SIZE) then
+    multipush(R1,R2,R3,R4,R5,R6,R7,R8,R9,R10);
+        R1 = RELEASE_INODE;
+        R2 = inode_i;
+        R3 = [SYSTEM_STATUS_TABLE + 1];
+        call RESOURCE_MANAGER;
+    multipop(R1,R2,R3,R4,R5,R6,R7,R8,R9,R10);
+    [return_address] = -2;
+    goto RETURN;
+endif;
+
+//  New block to be allocated 
+if(lseek % 512 == 0 && lseek == [INODE_TABLE + inode_i*16 + 2]) then
+    multipush(R1,R2,R3,R4,R5,R6,R7,R8,R9,R10);
+        R1 = GET_FREE_BLOCK;
+        call MEMORY_MANAGER;
+    multipop(R1,R2,R3,R4,R5,R6,R7,R8,R9,R10);
+    if (R0 == -1) then
+        multipush(R1,R2,R3,R4,R5,R6,R7,R8,R9,R10);
+            R1 = RELEASE_INODE;
+            R2 = inode_i;
+            R3 = [SYSTEM_STATUS_TABLE + 1];
+            call RESOURCE_MANAGER;
+        multipop(R1,R2,R3,R4,R5,R6,R7,R8,R9,R10);
+        [return_address] = -2;
+        goto RETURN;
+    endif;
+    [INODE_TABLE + inode_i*16 + 8 + lseek/512] = R0;
+endif;
+
+
+alias disk_block  R6;
+alias disk_offset R7;
+disk_block  = [INODE_TABLE + inode_i*16 + 8 + lseek/512];
+disk_offset = lseek % 512;
+
+//Write the data from the File Buffer 
+multipush(R1,R2,R3,R4,R5,R6,R7,R8,R9,R10);
+    R1 = BUFFERED_WRITE;
+    R2 = disk_block;
+    R3 = disk_offset;
+    R4 = word_addr;
+    call FILE_MANAGER;
+multipop(R1,R2,R3,R4,R5,R6,R7,R8,R9,R10);
+
+if(lseek == [INODE_TABLE + inode_i*16 + 2]) then
+    [INODE_TABLE + inode_i*16 + 2] = [INODE_TABLE + inode_i*16 + 2] + 1;
+    [ROOT_FILE + inode_i* 8 + 1] = [ROOT_FILE + inode_i* 8 + 1] + 1;
+endif;
+
+[oft_start + 2] = lseek + 1;       //increment lseek
+
+//release lock on inode
+multipush(R1,R2,R3,R4,R5,R6,R7,R8,R9,R10);
+    R1 = RELEASE_INODE;
+    R2 = inode_i;
+    R3 = [SYSTEM_STATUS_TABLE + 1];
+    call RESOURCE_MANAGER;
+multipop(R1,R2,R3,R4,R5,R6,R7,R8,R9,R10);
+
+[return_address] = 0;
+
+RETURN:
+[pt_sst + 9] = 0;
+SP = userSP;
+ireturn;
