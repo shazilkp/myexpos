@@ -1,0 +1,41 @@
+int main()
+{
+	decl
+		str name,data,cpname;
+		int temp,a,fd1,fd2;
+	enddecl
+
+	begin
+		temp = exposcall("Write", -2, "Copy from:");
+		temp = exposcall("Read", -1, name);
+        fd1 = exposcall("Open",name);
+
+        temp = exposcall("Write", -2, "Copy to:");
+		temp = exposcall("Read", -1, cpname);
+		
+		if(fd1 < 0) then
+			temp = exposcall("Write", -2, "no such file!");
+		else
+            fd2 = exposcall("Open",cpname);
+            if(fd2 == -1) then //file not found
+                temp = exposcall("Create",cpname,1);
+                fd2 = exposcall("Open",cpname);
+            endif;
+			a = 0;
+			while(a != -2) do
+				a = exposcall("Read",fd1,data);
+				if(a==-2) then
+					break;
+				endif;
+				temp = exposcall("Write",fd2,data);
+			endwhile;
+			
+			temp = exposcall("Close",fd1);
+			temp = exposcall("Close",fd2);
+		endif;
+		
+		
+		
+		return 0;
+	end
+}

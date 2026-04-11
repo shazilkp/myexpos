@@ -25,7 +25,9 @@ load --int=11 ../spl/spl_progs/int_11_s21.xsm
 load --int=13 ../spl/spl_progs/int_13_s22.xsm
 load --int=14 ../spl/spl_progs/int_14_s22.xsm
 load --int=15 ../spl/spl_progs/int_15_s25.xsm
-load --exec $HOME/myexpos/expl/samples/s25_a4.xsm
+load --exec $HOME/myexpos/expl/samples/s25_a2.xsm
 load --exec $HOME/myexpos/expl/samples/ls.xsm
 load --exec $HOME/myexpos/expl/samples/read.xsm
+load --exec $HOME/myexpos/expl/samples/s25_a1.xsm
+load --data $HOME/myexpos/sample.dat
 exit

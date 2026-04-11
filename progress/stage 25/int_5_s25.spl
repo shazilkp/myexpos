@@ -1,0 +1,205 @@
+alias currentPID R10;
+alias syscall    R11;
+alias userSP     R12;
+alias i          R13;
+alias filename   R14;
+alias retValAddr R15;
+
+alias temp1      R6;
+
+currentPID = [SYSTEM_STATUS_TABLE + 1];
+userSP = SP;
+[PROCESS_TABLE + currentPID*16 + 13] = SP;
+SP = [PROCESS_TABLE + currentPID*16 + 11]*512 - 1;
+
+//extract syscall - userSP-5
+temp1 = [PTBR + 2*((userSP-5)/512)];
+syscall = [temp1*512 + (userSP-5)%512];
+
+//pre-translate all stack addresses
+//arg1 addr = userSP-4
+temp1 = [PTBR + 2*((userSP-4)/512)];
+filename = temp1*512 + (userSP-4)%512;      //reuse as addr first
+
+
+//retval addr = userSP-1
+temp1 = [PTBR + 2*((userSP-1)/512)];
+retValAddr = temp1*512 + (userSP-1)%512;
+
+//now read actual values
+temp1 = filename;                           //save filename addr
+filename = [temp1];                         //read filename value
+
+//Open (2)
+if(syscall == INT_OPEN) then
+    [PROCESS_TABLE + currentPID*16 + 9] = INT_OPEN;
+    alias rtBase R8;
+    rtBase = [PROCESS_TABLE + 16 * currentPID + 11] * 512 + RESOURCE_TABLE_OFFSET;
+    
+
+    i = 0;
+    while(i < 8) do
+        if([rtBase + 2*i] == -1) then
+            break;
+        endif;
+        i = i + 1;
+    endwhile;
+
+    if(i == 8)then
+        [retValAddr] = -3;
+        goto RETURN;
+    endif;
+
+    multipush(R6,R8,R9,R10,R11,R12,R13,R14,R15);
+        R1 = OPEN;
+        R2 = filename;
+        call FILE_MANAGER;
+    multipop(R6,R8,R9,R10,R11,R12,R13,R14,R15);
+
+    if(R0 < 0)then
+        [retValAddr] = R0;
+        goto RETURN;
+    endif;
+    
+    //SET PER PROCESS RESOURCE TABLE ENTRY
+    [rtBase +2*i + 0] = FILE;
+    [rtBase +2*i + 1] = R0;
+
+
+    //return the index of per process resource table entry(file descriptor)
+    [retValAddr] = i;
+    goto RETURN;
+endif;
+
+//Close (3)
+if(syscall == INT_CLOSE) then
+    [PROCESS_TABLE + currentPID*16 + 9] = INT_CLOSE;
+
+    alias file_desc R8;
+    file_desc = filename;               //arg1 already read into filename
+
+    //validate file descriptor range
+    if(file_desc < 0 || file_desc > 7) then
+        [retValAddr] = -1;              //invalid file descriptor
+        goto RETURN;
+    endif;
+
+    alias rtBase R9;
+    rtBase = [PROCESS_TABLE + 16*currentPID + 11]*512 + RESOURCE_TABLE_OFFSET;
+
+    //check resource table entry is a FILE
+    if([rtBase + file_desc*2] != FILE) then
+        [retValAddr] = -1;              //not an open file
+        goto RETURN;
+    endif;
+
+    alias oft_index R5;
+    oft_index = [rtBase + file_desc*2 + 1];     //open file table index
+
+    multipush(R5,R6,R7,R8,R9,R10,R11,R12,R13,R14,R15);
+        R1 = CLOSE;
+        R2 = oft_index;
+        call FILE_MANAGER;
+    multipop(R5,R6,R7,R8,R9,R10,R11,R12,R13,R14,R15);
+
+    //invalidate per process resource table entry
+    [rtBase + file_desc*2 + 0] = -1;
+    [rtBase + file_desc*2 + 1] = -1;
+
+    [retValAddr] = 0;                   //return 0 on success
+    goto RETURN;
+endif;
+
+//Seek (6)
+if (syscall == INT_SEEK) then
+    [PROCESS_TABLE + currentPID*16 + 9] = INT_SEEK;
+    alias file_desc R14;        //re alias it
+    alias offset R7;
+
+    temp1 = [PTBR + 2*((userSP-3)/512)];
+    offset = [temp1*512 + (userSP-3)%512];
+
+    //validate file descriptor range
+    if(file_desc < 0 || file_desc > 7) then
+        [retValAddr] = -1;
+        goto RETURN;
+    endif;
+
+    //locate per process resource table entry
+    alias pprt R8;
+    pprt = [PROCESS_TABLE + currentPID*16 + 11]*512 + RESOURCE_TABLE_OFFSET + 2*file_desc;
+
+    //check resource table entry is a FILE
+    if([pprt] != FILE) then
+        [retValAddr] = -1;
+        goto RETURN;
+    endif;
+
+    //get open file table index
+    alias oft_i    R9;
+    alias oft_start R2;
+    alias inode_i  R3;
+
+    oft_i    = [pprt + 1];
+    oft_start = OPEN_FILE_TABLE + oft_i*4;
+    inode_i  = [oft_start];
+
+    multipush(R2,R3,R7,R9,R10,R11,R12,R13,R14,R15);
+        R1 = ACQUIRE_INODE;
+        R2 = inode_i;
+        R3 = [SYSTEM_STATUS_TABLE + 1];
+        call RESOURCE_MANAGER;
+    multipop(R2,R3,R7,R9,R10,R11,R12,R13,R14,R15);
+
+    if(R0 == -1) then
+        [retValAddr] = -1;
+        goto RETURN;
+    endif;
+
+    alias lseek R4;
+    lseek = [oft_start + 2];
+
+    alias file_size R5;
+    if(inode_i == INODE_ROOT)then
+        file_size = 480;
+    else
+        file_size = [INODE_TABLE + inode_i * 16 + 2];
+    endif;
+
+    if (lseek + offset < 0) then
+        multipush(R2,R3,R4,R5,R7,R9,R10,R11,R12,R13,R14,R15);
+            R1 = RELEASE_INODE;
+            R2 = inode_i;
+            R3 = [SYSTEM_STATUS_TABLE + 1];
+            call RESOURCE_MANAGER;
+        multipop(R2,R3,R4,R5,R7,R9,R10,R11,R12,R13,R14,R15);
+        [retValAddr] = -2;
+        goto RETURN;
+    endif;
+
+    if (offset == 0) then
+        [oft_start + 2] = 0;
+    else
+        if (lseek + offset > file_size) then
+            [oft_start + 2] = file_size;
+        else
+            [oft_start + 2] = lseek + offset;
+        endif;
+    endif;
+
+    multipush(R2,R3,R4,R5,R7,R9,R10,R11,R12,R13,R14,R15);
+        R1 = RELEASE_INODE;
+        R2 = inode_i;
+        R3 = [SYSTEM_STATUS_TABLE + 1];
+        call RESOURCE_MANAGER;
+    multipop(R2,R3,R4,R5,R7,R9,R10,R11,R12,R13,R14,R15);
+
+    [retValAddr] = 0;                   //return 0 on success
+    goto RETURN;
+endif;  
+
+
+RETURN:
+[PROCESS_TABLE + currentPID*16 + 9] = 0;
+SP = userSP;
+ireturn;
