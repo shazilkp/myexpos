@@ -1,0 +1,63 @@
+//LOGOUT
+
+alias userSP R1;
+userSP = SP;
+
+alias return_address R2;
+return_address= [PTBR + ((userSP-1)/512)*2]*512 + (userSP-1)%512;
+
+//USER to KERNEL stack
+alias pcb R3;
+pcb =PROCESS_TABLE + 16*[SYSTEM_STATUS_TABLE+1];
+
+[pcb + 9] = 28;  //MODE FLAG
+[pcb + 13] = SP;
+SP = [pcb+11]*512 - 1;
+
+//If the current process is not the shell, 
+//return -1. /* Shell process has the PID 2 */
+
+if([SYSTEM_STATUS_TABLE+1]!=2) then
+    [return_address] = -1;
+    SP = userSP;
+    [pcb + 9] = 0;  //MODE FLAG
+    ireturn;
+endif;
+
+//Kill all user processes except the shell 
+//by calling the kill_all() function in the Process Manager module.
+multipush(R1,R2,R3);
+R1 = KILL_ALL;
+R2 = [SYSTEM_STATUS_TABLE + 1];
+call PROCESS_MANAGER; //MOD 1  
+multipop(R1,R2,R3); 
+
+//Set the STATE of the current process
+//(shell) in the process table to TERMINATED.
+[pcb +  4] = TERMINATED;
+
+///* Shell should be set ready to run 
+//  when the next user logs in. */
+//Obtain the entry point IP value 
+//from the header of the shell program. 
+//Place it in the beginning (logical addesss 4096) 
+//of the stack of the shell(current process). 
+//Reset the USERSP field of the 
+//shell to 4096.
+[[PTBR + 16]*512] = [[PTBR+8]*512 + 1];
+[pcb + 13] = 8*512;
+
+//Wake up the Login process by changing STATE in it's process table entry to READY.
+[PROCESS_TABLE + 16 + 4] = READY;
+
+//In system status table, reset the CURRENT_USER_ID field back to 0 (kernel).
+[SYSTEM_STATUS_TABLE] = 0;
+
+//Invoke the context_switch() function in the Scheduler Module.
+multipush(R1,R2,R3);
+call SCHEDULER; //mod 5
+multipop(R1,R2,R3);
+
+[pcb+9] = 0;  //MODE FLAG
+SP = [pcb+13];
+ireturn;

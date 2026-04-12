@@ -1,0 +1,198 @@
+// User syscalls: NEWUSR, REMUSR, SETPWD, GETUID, GETUNAME
+alias currentPID  R10;
+alias syscall     R11;
+alias userSP      R12;
+alias username    R13;
+alias retValAddr  R15;
+alias temp1       R6;
+
+currentPID = [SYSTEM_STATUS_TABLE + 1];
+userSP = SP;
+[PROCESS_TABLE + currentPID*16 + 13] = SP;
+SP = [PROCESS_TABLE + currentPID*16 + 11]*512 - 1;
+
+// pre-translate stack fields
+temp1 = [PTBR + 2*((userSP-5)/512)];
+syscall = [temp1*512 + (userSP-5)%512];
+
+temp1 = [PTBR + 2*((userSP-1)/512)];
+retValAddr = temp1*512 + (userSP-1)%512;
+
+temp1 = [PTBR + 2*((userSP-4)/512)];
+username = [temp1*512 + (userSP-4)%512];
+
+[PROCESS_TABLE + currentPID*16 + 9] = syscall;   // mode flag
+
+// NEWUSR (28)
+if(syscall == INT_NEWUSR) then
+    alias password R14;
+    temp1 = [PTBR + 2*((userSP-3)/512)];
+    password = [temp1*512 + (userSP-3)%512];
+
+    // only root user running shell may create users
+    if([SYSTEM_STATUS_TABLE] != 1 || currentPID != 2) then
+        [retValAddr] = -2;
+        goto RETURN;
+    endif;
+
+    // reject if username already exists
+    alias i R7;
+    i = 1;
+    while(i < MAX_USER_NUM) do
+        if([USER_TABLE + i*2] == username) then
+            [retValAddr] = -1;
+            goto RETURN;
+        endif;
+        i = i + 1;
+    endwhile;
+
+    i = 1;
+    while(i < MAX_USER_NUM) do
+        if([USER_TABLE + i*2] == -1) then
+            break;
+        endif;
+        i = i + 1;
+    endwhile;
+
+    if(i == MAX_USER_NUM) then
+        [retValAddr] = -3;
+        goto RETURN;
+    endif;
+
+    encrypt password;
+    [USER_TABLE + i*2]     = username;
+    [USER_TABLE + i*2 + 1] = password;
+
+    [retValAddr] = 0;
+    goto RETURN;
+endif;
+
+// REMUSR (29)
+if(syscall == INT_REMUSR) then
+
+    // only root user running shell may remove users
+    if([SYSTEM_STATUS_TABLE] != 1 || currentPID != 2) then
+        [retValAddr] = -2;
+        goto RETURN;
+    endif;
+
+    // cannot remove kernel or root
+    if(username == "root" || username == "kernel") then
+        [retValAddr] = -2;
+        goto RETURN;
+    endif;
+
+    // find user table entry
+    alias i R7;
+    i = 1;
+    while(i < MAX_USER_NUM) do
+        if([USER_TABLE + i*2] == username) then
+            break;
+        endif;
+        i = i + 1;
+    endwhile;
+
+    if(i == MAX_USER_NUM) then
+        [retValAddr] = -1;
+        goto RETURN;
+    endif;
+
+    // reject if user still owns files on disk
+    alias rf R9;
+    rf = 0;
+    while(rf < MAX_FILE_NUM) do
+        if([ROOT_FILE + rf*8] != -1 && [ROOT_FILE + rf*8 + 3] == username) then
+            [retValAddr] = -3;
+            goto RETURN;
+        endif;
+        rf = rf + 1;
+    endwhile;
+
+    // invalidate user table entry
+    [USER_TABLE + i*2]   = -1;
+    [USER_TABLE + i*2+1] = -1;
+
+    [retValAddr] = 0;
+    goto RETURN;
+endif;
+
+// SETPWD (30)
+if(syscall == INT_SETPWD) then
+    alias password R14;
+    temp1 = [PTBR + 2*((userSP-3)/512)];
+    password = [temp1*512 + (userSP-3)%512];
+
+    // only shell may change passwords
+    if(currentPID != 2) then
+        [retValAddr] = -1;
+        goto RETURN;
+    endif;
+
+    // find user table entry
+    alias i R7;
+    i = 1;
+    while(i < MAX_USER_NUM) do
+        if([USER_TABLE + i*2] == username) then
+            break;
+        endif;
+        i = i + 1;
+    endwhile;
+
+    if(i == MAX_USER_NUM) then
+        [retValAddr] = -2;
+        goto RETURN;
+    endif;
+
+    alias userid R9;
+    userid = i;
+
+    if(userid != [SYSTEM_STATUS_TABLE]) then
+        if([SYSTEM_STATUS_TABLE] != 1) then
+            [retValAddr] = -1;
+            goto RETURN;
+        endif;
+    endif;
+
+    encrypt password;
+    [USER_TABLE + i*2+1] = password;
+
+    [retValAddr] = 0;
+    goto RETURN;
+endif;
+
+// GETUID (32)
+if(syscall == INT_GETUID) then
+    alias i R7;
+    i = 0;
+    while(i < MAX_USER_NUM) do
+        if([USER_TABLE + i*2] == username) then
+            [retValAddr] = i;
+            goto RETURN;
+        endif;
+        i = i + 1;
+    endwhile;
+
+    [retValAddr] = -1;
+    goto RETURN;
+endif;
+
+// GETUNAME (33)
+if(syscall == INT_GETUNAME) then
+    alias userid R13;   // re-alias: arg1 is userid here, not username
+    temp1 = [PTBR + 2*((userSP-4)/512)];
+    userid = [temp1*512 + (userSP-4)%512];
+
+    if(userid < 0 || userid > 15) then
+        [retValAddr] = -1;
+        goto RETURN;
+    endif;
+
+    // returns -1 automatically for invalid (empty) entries
+    [retValAddr] = [USER_TABLE + userid*2];
+    goto RETURN;
+endif;
+
+RETURN:
+[PROCESS_TABLE + currentPID*16 + 9] = 0;
+SP = userSP;
+ireturn;

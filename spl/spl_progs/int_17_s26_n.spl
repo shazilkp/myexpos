@@ -1,0 +1,90 @@
+//LOGIN
+
+alias userSP R1;
+userSP = SP;
+
+alias return_address R2;
+return_address= [PTBR + ((userSP-1)/512)*2]*512 + (userSP-1)%512;
+
+//USER to KERNEL stack
+alias pcb R3;
+pcb =PROCESS_TABLE + 16*[SYSTEM_STATUS_TABLE+1];
+
+[pcb + 9] = 27;  //MODE FLAG
+[pcb + 13] = SP;
+SP = [pcb+11]*512 - 1;
+
+//If pid of current process is not 1, return -2
+if([SYSTEM_STATUS_TABLE+1] != 1) then
+    [return_address] = -2;
+    SP = userSP;
+    [pcb + 9] = 0;  //MODE FLAG
+    ireturn;
+endif;
+
+//Get username
+alias username R4;
+username = [[PTBR + ((userSP-4)/512)*2]*512 + (userSP-4)%512];
+
+//Get passwd
+alias passwd R5;
+passwd = [[PTBR + ((userSP-3)/512)*2]*512 + (userSP-3)%512];
+
+
+//Get user  table entry correspondinng to username
+alias userid R6;
+R6 = 1; //from root user
+while(R6 < MAX_USER_NUM) do
+    if([USER_TABLE + R6*2]==username) then
+        break;
+    endif;
+    R6 = R6 + 1;
+endwhile;
+
+//If an entry does not exist, return -1.
+if(userid == MAX_USER_NUM) then
+    [return_address] = -1;
+    SP = userSP;
+    [pcb + 9] = 0;  //MODE FLAG
+    ireturn;
+endif;
+
+//Use the ecrypt statement to encrypt the password supplied as input.
+encrypt passwd;
+
+// If the encypted input password 
+//does not match the ENCRYPTED PASSWORD 
+//field in the user table entry, return -1.
+if([USER_TABLE + userid*2 +1] != passwd) then
+    [return_address] = -1;
+    SP = userSP;
+    [pcb + 9] = 0;  //MODE FLAG
+    ireturn;
+endif;
+
+// In the process table entry for the shell process, 
+//set STATE as CREATED and USERID as that of 
+//the user who is logging in.
+[PROCESS_TABLE + 2*16 + 4] = CREATED; //STATE
+[PROCESS_TABLE + 2*16 + 3] = userid; //USERID
+
+// Set the state of the current process in 
+//it's process table entry as (WAIT_PROCESS, 2) 
+///* Login waits for shell to exit */
+[pcb + 4] = WAIT_PROCESS; //STATE
+[pcb + 5] = 2; //PID
+
+//In system status table, 
+//set the CURRENT_USER_ID as that of the user who is logging in.
+[SYSTEM_STATUS_TABLE + 0] = userid;
+
+// Invoke the context_switch() function in the Scheduler Module.
+multipush(R1,R2,R3,R4,R5,R6);
+call SCHEDULER;
+multipop(R1,R2,R3,R4,R5,R6);
+
+// Reset the MODE_FLAG and restore SP to user stack.
+[pcb + 9]  = 0;
+SP = userSP;
+[return_address] = 0;
+ireturn;

@@ -1,0 +1,29 @@
+
+
+int main(){
+    decl
+        str usrname,pass;
+        int temp;
+    enddecl
+
+    begin
+        while(1 == 1)do
+            temp = exposcall("Write",-2,"Username");
+            temp = exposcall("Read",-1,usrname);
+
+            temp = exposcall("Write",-2,"Password");
+            temp = exposcall("Read",-1,pass);
+
+            temp = exposcall("Login",usrname,pass);
+
+            if(temp == -1)then
+                temp = exposcall("Write",-2,"Inv cred");
+            endif;
+            
+            if(temp == -2)then
+                temp = exposcall("Write",-2,"Perm Denied");
+            endif;
+        endwhile;
+        return 0;
+    end
+}

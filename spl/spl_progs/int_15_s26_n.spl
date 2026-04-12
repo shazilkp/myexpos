@@ -1,0 +1,79 @@
+//Shutdown system call
+
+//Switch to kernel stack
+alias userSP R1;
+userSP = SP;
+
+alias pt_sst R2;
+pt_sst = PROCESS_TABLE + ([SYSTEM_STATUS_TABLE +1] * 16);
+[pt_sst + 13] = SP;
+SP = [pt_sst + 11]*512 - 1;
+
+R3 = [pt_sst + 14]; //PTBR
+
+//Set mode flag
+[pt_sst + 9] = 21;
+
+//Check if current process is not shell(pid = 2) OR not root user(userid = 1)
+//then return -1
+if(([pt_sst + 1]!= 2) || ([pt_sst + 3]!=1)) then //shell has pid=2 ?
+    [[R3 + ((userSP-1)/512)*2]*512 + (userSP-1)%512] = -1; //return  value
+    [pt_sst + 9] = 0; //mode flag
+    SP = userSP;//switch to user stack
+    ireturn;
+endif;
+
+//Kill all user processes except the idle, 
+//login and the current process(shell) by calling the 
+//kill_all() function in the Process Manager module.
+R1=KILL_ALL;
+R2=[SYSTEM_STATUS_TABLE+1];
+call PROCESS_MANAGER; //MOD 1
+
+// Loop through the Buffer Table
+//     If the buffer is dirty
+//         Commit changes to the disk by calling the disk_store() function in the Device Manager module.
+alias mem_block R5; //buffer block
+mem_block = 0;
+while(mem_block < MAX_BUFFER) do
+    if([BUFFER_TABLE + mem_block*4 + 1] == 1) then //dirty bit
+        multipush(R5);
+        R1 = DISK_STORE;
+        R2 = [SYSTEM_STATUS_TABLE + 1]; //pid
+        R3 = mem_block + 71; //mem no
+        R4 = [BUFFER_TABLE + mem_block*4];//block no
+        call DEVICE_MANAGER; //MOD 4
+        multipop(R5);
+    endif;
+    mem_block = mem_block + 1;
+endwhile;
+
+
+//Commit changes made in memory copies of
+//INODE_TABLE(and user table), ROOT_FILE, DISK_FREE_LIST
+
+//INODE_TABLE
+R1 = DISK_STORE;
+R2 = [SYSTEM_STATUS_TABLE + 1]; //pid
+R3 = 59;
+R4 = 3;
+call  DEVICE_MANAGER; //MOD 4
+R1 = DISK_STORE;
+R2 = [SYSTEM_STATUS_TABLE + 1]; //pid
+R3 = 60;
+R4 = 4;
+call  DEVICE_MANAGER; //MOD 4
+//ROOT_FILE
+R1 = DISK_STORE;
+R2 = [SYSTEM_STATUS_TABLE + 1]; //pid
+R3 = 62;
+R4 = 5;
+call  DEVICE_MANAGER; //MOD 4
+//DISK_FREE_LIST
+R1 = DISK_STORE;
+R2 = [SYSTEM_STATUS_TABLE + 1]; //pid
+R3 = 61;
+R4 = 2;
+call  DEVICE_MANAGER; //MOD 4
+
+halt;

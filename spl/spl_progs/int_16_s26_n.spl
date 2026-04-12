@@ -1,0 +1,248 @@
+// User related
+
+alias userSP R1;
+userSP = SP;
+
+//USER to KERNEL stack
+alias pcb R2;
+pcb =PROCESS_TABLE + 16*[SYSTEM_STATUS_TABLE+1];
+[pcb + 13] = SP;
+SP = [pcb+11]*512 - 1;
+
+//syscall 
+alias syscall R3;
+syscall = [[PTBR + ((userSP - 5)/512)*2]*512 + (userSP-5)%512];
+
+alias return_address R4;
+return_address= [PTBR + ((userSP-1)/512)*2]*512 + (userSP-1)%512;
+    
+alias username R5;
+username = [[PTBR + ((userSP - 4)/512)*2]*512 + (userSP - 4)%512];
+
+//MODE FLAG
+[pcb + 9] = syscall;
+
+if(syscall == INT_NEWUSR) then
+    alias password R6;
+    password = [[PTBR + ((userSP - 3)/512)*2]*512 + (userSP - 3)%512];
+
+    // If the current user is not root(userid 1), or if the current process is not the shell, return -2.
+    if([SYSTEM_STATUS_TABLE] != 1 || [SYSTEM_STATUS_TABLE + 1] != 2) then
+        [return_address] = -2;
+        SP = userSP;
+        [pcb + 9 ] = 0;
+        ireturn;
+    endif;
+
+    // Loop through the User Table and exit returning -1 if an entry for the user already exists.
+    R7 = USER_TABLE;
+    R8 = USER_TABLE + 16*2;
+    while(R7 < R8) do
+        if([R7] == username) then
+            [return_address] = -1;
+            SP = userSP;
+            [pcb + 9 ] = 0;
+            ireturn;
+        endif;
+        R7 = R7+2;
+    endwhile;
+
+    // Find a free entry in the User Table. If no free entry is found, return -3.
+    R7 = USER_TABLE;
+    while(R7 < R8) do
+        if([R7] == -1) then
+            break;
+        endif;
+        R7 = R7+2;
+    endwhile;
+
+    if(R7 == R8) then
+        [return_address] = -3;
+        SP = userSP;
+        [pcb + 9 ] = 0;
+        ireturn;
+    endif;
+
+    // Find the encrypted password by applying the ENCRYPT instruction on the input password.
+    encrypt password;
+
+    // Set the USERNAME and ENCRYPTED PASSWORD fields of the User Table entry.
+    [R7] = username;
+    [R7+1] = password;
+
+    // Set the MODE_FLAG in the process table entry of the parent process to 0.
+    [pcb + 9] = 0;
+    SP = userSP;
+
+    // Return 0
+    [return_address] = 0;
+    ireturn;
+endif;
+
+if(syscall == INT_REMUSR) then
+    // If the current user is not root, 
+    //or if the current process is not the shell, return -2.
+    if([SYSTEM_STATUS_TABLE] != 1 || [SYSTEM_STATUS_TABLE + 1] != 2) then
+        [return_address] = -2;
+        SP = userSP;
+        [pcb + 9 ] = 0;
+        ireturn;
+    endif;
+
+    // If the user to be removed is the "root" or "kernel" return -2.
+    if(username == "root" || username == "kernel") then
+        [return_address] = -2;
+        SP = userSP;
+        [pcb + 9 ] = 0;
+        ireturn;
+    endif;
+
+    // Loop through the User Table and find the entry curresponding to the user.
+    R7 = USER_TABLE;
+    R8 = USER_TABLE + 2*16;
+    while(R7 < R8) do
+        if([R7] == username) then
+            break;
+        endif;
+        R7 = R7+2;
+    endwhile;
+    // If the entry is not found, return -1.
+    if(R7 == R8) then
+        [return_address] = -1;
+        SP = userSP;
+        [pcb + 9 ] = 0;
+        ireturn;
+    endif; 
+
+    // Loop through the Root File and exit returning -3 
+    //if there are files of the user present on disk.
+    R8 = ROOT_FILE;
+    R9 = ROOT_FILE + 8*60;
+    while(R8<R9) do
+        if([R8] != -1 && [R8+3] == username) then
+            [return_address] = -3;
+            SP = userSP;
+            [pcb + 9 ] = 0;
+            ireturn;
+        endif;
+        R8 =R8+8;
+    endwhile;
+
+    // Invalidate the entry by setting the USERNAME and ENCRYPTED PASSWORD fields to -1.
+    [R7] = -1;
+    [R7+1] = -1;
+
+    // Set the MODE_FLAG in the process table entry of the parent process to 0.
+    [pcb + 9] = 0;
+
+    // Return 0.
+    [return_address] = 0;
+    SP = userSP;
+    ireturn;
+
+endif;
+
+if(syscall ==  INT_SETPWD) then
+    alias password R6;
+    password = [[PTBR + ((userSP - 3)/512)*2]*512 + (userSP - 3)%512];
+
+    //current process not shellreturn -1
+    if([SYSTEM_STATUS_TABLE + 1]!=2)  then
+        [return_address] = -1;
+        SP = userSP;
+        [pcb + 9 ] = 0;
+        ireturn;
+    endif;
+
+
+    // Loop through the User Table and finds the entry curresponding to the user name.
+    // If entry is not found, return -2.
+    R7 = USER_TABLE;
+    R8 = USER_TABLE + 2*16;
+    while(R7 < R8) do
+        if([R7] == username) then
+            break;
+        endif;
+        R7 = R7+2;
+    endwhile;
+    if(R7 == R8) then
+        [return_address] = -2;
+        SP = userSP;
+        [pcb + 9 ] = 0;
+        ireturn;
+    endif; 
+    
+    alias userid R8;
+    userid = (R7 - USER_TABLE)/2;
+    // If (userid of the process is not equal to the userid of the user) {
+    //     If (the current user is not root)) { 
+    //         Return -1 
+    //     }
+    // }
+    if(userid != [SYSTEM_STATUS_TABLE])then
+        if(userid != 1) then
+            [return_address] = -1;
+            SP = userSP;
+            [pcb + 9 ] = 0;
+            ireturn;
+        endif;
+    endif;
+
+    // Find the encrypted password by applying the ENCRYPT instruction on the input password.
+    encrypt password;
+    // Set the ENCRYPTED PASSWORD field in the user table entry.
+    [R7+1]=password;
+    // Set the MODE_FLAG in the process table entry of the parent process to 0.
+    // Return 0.
+    [return_address] = 0;
+    SP = userSP;
+    [pcb + 9 ] = 0;
+    ireturn;
+endif;
+
+
+if(syscall == INT_GETUID)  then
+
+    //Loop through the User Table:
+    //     If username is equal to USERNAME field of the entry
+    //         return index of the entry
+    R6 = USER_TABLE;
+    R7 = USER_TABLE + 2*16;
+    while(R6 <R7) do
+        if([R6] == username) then
+            [return_address] = (R6-USER_TABLE)/2;
+            [pcb + 9] =0;
+            SP = userSP;
+            ireturn;
+        endif;
+        R6=R6+2;
+    endwhile;
+
+    // Return -1    
+    [return_address] =-1;
+    [pcb+9] = 0;
+    SP  =userSP;
+    ireturn;
+endif;
+
+if(syscall == INT_GETUNAME)  then
+    alias userid R5;
+    // If (UserID < 0 or UserID > 15)
+    //     Return -1
+    if(userid <0 || userid>15) then
+        [return_address] =  -1;
+        [pcb+9]=0;
+        SP = userSP;
+        ireturn;
+    endif;
+
+    // If the user table entry curresponding to the userid is invalid, return -1.
+    // Fetch the user name from the User Table.
+    [return_address] = [USER_TABLE + userid*2]; //will be  -1 forinvalid entries
+
+    // Set the MODE_FLAG in the process table entry of the parent process to 0.
+    [pcb+9] =0;
+    SP=userSP;
+    // Return the username.    
+    ireturn;
+endif;

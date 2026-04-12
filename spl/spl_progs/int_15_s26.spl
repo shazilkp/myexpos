@@ -1,0 +1,83 @@
+alias userSP R1;
+userSP = SP;
+
+alias currentPID R2;
+currentPID = [SYSTEM_STATUS_TABLE + 1];
+
+SP = [PROCESS_TABLE + 16 * currentPID + 11] * 512 - 1 ;
+
+[PROCESS_TABLE + 16 * currentPID + 9] = INT_SHUTDOWN;        // syscall = 21
+
+
+if (currentPID != 2 || [PROCESS_TABLE + (16 * currentPID) + 3] != 1) then       //If the current process is not shell or the current user is not root user 
+
+    [[PTBR + 2 * (userSP - 1) /512]* 512 + ((userSP - 1) % 512)] = -1;          //return -1
+    [PROCESS_TABLE + (currentPID * 16) + 9] = 0;
+    SP = [PROCESS_TABLE + ( currentPID * 16) + 13];
+    ireturn;      
+endif;                                                                                                   
+
+// breakpoint;
+
+//call kill_all
+multipush(R1,R2);
+    R1 = KILL_ALL;
+    R2 = currentPID;
+    call PROCESS_MANAGER;
+multipop(R1,R2);
+
+// breakpoint;
+
+alias i R5;
+i = 0;
+while (i < MAX_BUFFER) do
+    if([BUFFER_TABLE + i*4 + 1] == 1)then
+        multipush(R1,R2,R5);
+            R1 = DISK_STORE;
+            R4 = [BUFFER_TABLE + i*4];
+            R3 = 71 + i;
+            R2 = currentPID;
+            call DEVICE_MANAGER;
+        multipop(R1,R2,R5);
+    endif;
+    i = i + 1;
+endwhile;
+// breakpoint;
+
+//inode  table and user table storing to disk
+multipush(R1,R2);
+    R1 = DISK_STORE;
+    R2 = currentPID;
+    R3 = 59;
+    R4 = 3;
+    call DEVICE_MANAGER;
+multipop(R1,R2);
+
+// breakpoint;
+multipush(R1,R2);
+    R1 = DISK_STORE;
+    R2 = currentPID;
+    R3 = 60;
+    R4 = 4;
+    call DEVICE_MANAGER;
+multipop(R1,R2);
+
+//root file
+multipush(R1,R2);
+    R1 = DISK_STORE;
+    R2 = currentPID;
+    R3 = 62;
+    R4 = 5;
+    call DEVICE_MANAGER;
+multipop(R1,R2);
+
+//disk free list
+multipush(R1,R2);
+    R1 = DISK_STORE;
+    R2 = currentPID;
+    R3 = 61;
+    R4 = 2;
+    call DEVICE_MANAGER;
+multipop(R1,R2);
+
+halt;

@@ -1,0 +1,76 @@
+// LOGIN (syscall 27)
+alias currentPID  R10;
+alias userSP      R12;
+alias retValAddr  R15;
+alias temp1       R6;
+alias username    R13;
+alias passwd      R14;
+alias userid      R8;
+
+currentPID = [SYSTEM_STATUS_TABLE + 1];
+userSP = SP;
+[PROCESS_TABLE + currentPID*16 + 13] = SP;
+SP = [PROCESS_TABLE + currentPID*16 + 11]*512 - 1;
+
+// pre-translate return address
+temp1 = [PTBR + 2*((userSP-1)/512)];
+retValAddr = temp1*512 + (userSP-1)%512;
+
+//27 FLAG
+[PROCESS_TABLE + currentPID*16 + 9] = INT_LOGIN;   // mode flag
+
+// only shell (PID 1) may invoke login
+if(currentPID != 1) then
+    [retValAddr] = -2;
+    goto RETURN;
+endif;
+
+// read username (arg1) and passwd (arg2)
+temp1 = [PTBR + 2*((userSP-4)/512)];
+username = [temp1*512 + (userSP-4)%512];
+
+temp1 = [PTBR + 2*((userSP-3)/512)];
+passwd = [temp1*512 + (userSP-3)%512];
+
+// search user table for matching username (skip entry 0 = kernel)
+userid = 1;
+while(userid < MAX_USER_NUM) do
+    if([USER_TABLE + userid*2] == username) then
+        break;
+    endif;
+    userid = userid + 1;
+endwhile;
+
+if(userid == MAX_USER_NUM) then
+    [retValAddr] = -1;
+    goto RETURN;
+endif;
+
+// verify password
+encrypt passwd;
+if([USER_TABLE + userid*2 + 1] != passwd) then
+    [retValAddr] = -1;
+    goto RETURN;
+endif;
+
+// wake shell (PID 2), set its userid
+[PROCESS_TABLE + 2*16 + 4] = CREATED;
+[PROCESS_TABLE + 2*16 + 3] = userid;
+
+// login waits for shell to exit
+[PROCESS_TABLE + currentPID*16 + 4] = WAIT_PROCESS;
+[PROCESS_TABLE + currentPID*16 + 5] = 2;
+
+// update current user in system status table
+[SYSTEM_STATUS_TABLE + 0] = userid;
+
+multipush(R6,R8,R10,R12,R13,R14,R15);
+    call SCHEDULER;
+multipop(R6,R8,R10,R12,R13,R14,R15);
+
+[retValAddr] = 0;
+
+RETURN:
+[PROCESS_TABLE + currentPID*16 + 9] = 0;
+SP = userSP;
+ireturn;

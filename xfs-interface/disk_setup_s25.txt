@@ -17,7 +17,7 @@ load --module 7 ../spl/spl_progs/boot_module_s25.xsm
 load --int=4 ../spl/spl_progs/int_4_s23.xsm
 load --int=5 ../spl/spl_progs/int_5_s25.xsm
 load --int=6 ../spl/spl_progs/int_6_s24.xsm
-load --int=7 ../spl/spl_progs/int_7_s25_n.xsm
+load --int=7 ../spl/spl_progs/int_7_s25.xsm
 load --int=8 ../spl/spl_progs/int_8_s24.xsm
 load --int=9 ../spl/spl_progs/int_9_s19.xsm
 load --int=10 ../spl/spl_progs/int_10_s20.xsm
@@ -29,5 +29,6 @@ load --exec $HOME/myexpos/expl/samples/s25_a2.xsm
 load --exec $HOME/myexpos/expl/samples/ls.xsm
 load --exec $HOME/myexpos/expl/samples/read.xsm
 load --exec $HOME/myexpos/expl/samples/s25_a1.xsm
+load --exec $HOME/myexpos/expl/samples/s25_a4.xsm
 load --data $HOME/myexpos/sample.dat
 exit

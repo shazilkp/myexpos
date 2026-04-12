@@ -1,0 +1,35 @@
+int main()
+{
+    decl
+        int a,temp,fd,i,ret,uRoot,uname,username;
+        str input,inv,fname,winp;
+    enddecl
+    begin
+        fname="NULL";
+        winp = "WrongFile";
+        temp = exposcall("Read",-1,username);
+        fd = exposcall("Open","root");
+        if (fd >= 0 )then
+            ret = exposcall("Read", fd,fname);
+			temp = exposcall("Seek",fd,2);
+			temp = exposcall("Read",fd,uname);
+            while(ret != -2)do
+            	if ( uname == username )then
+					temp = exposcall("Write",-2,"Deleting");
+					temp = exposcall("Write",-2,fname);
+                    i = exposcall("Delete",fname);
+					temp = exposcall("Write",-2,"Return");
+					temp = exposcall("Write",-2,i);
+				endif;
+				temp = exposcall("Seek",fd,4);
+                ret = exposcall("Read", fd,fname);
+				temp = exposcall("Seek",fd,2);
+				temp = exposcall("Read",fd,uname);
+            endwhile;
+            temp = exposcall("Close",fd);
+        else    
+            temp = exposcall("Write",-2,winp);
+        endif;
+        return 0;
+    end
+}

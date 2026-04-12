@@ -1,0 +1,58 @@
+// LOGOUT (syscall 28)
+alias currentPID  R10;
+alias userSP      R12;
+alias retValAddr  R15;
+alias temp1       R6;
+
+
+currentPID = [SYSTEM_STATUS_TABLE + 1];
+userSP = SP;
+[PROCESS_TABLE + currentPID*16 + 13] = SP;
+SP = [PROCESS_TABLE + currentPID*16 + 11]*512 - 1;
+
+// pre-translate return address
+temp1 = [PTBR + 2*((userSP-1)/512)];
+retValAddr = temp1*512 + (userSP-1)%512;
+
+[PROCESS_TABLE + currentPID*16 + 9] = 28;   // mode flag
+
+// only shell (PID 2) may invoke logout
+if(currentPID != 2) then
+    [retValAddr] = -1;
+    goto RETURN;
+endif;
+
+// kill all user processes except shell
+multipush(R6,R8,R10,R12,R15);
+    R1 = KILL_ALL;
+    R2 = currentPID;
+    call PROCESS_MANAGER;
+multipop(R6,R8,R10,R12,R15);
+
+// terminate shell
+[PROCESS_TABLE + currentPID*16 + 4] = TERMINATED;
+
+// reset shell stack — place entry point IP at logical addr 4096
+// and reset USERSP to 4096 so next login restarts shell cleanly
+[[PTBR + 16]*512] = [[PTBR + 8]*512 + 1];
+[PROCESS_TABLE + currentPID*16 + 13] = 8*512;
+
+// wake login process (PID 1)
+[PROCESS_TABLE + 1*16 + 4] = READY;
+
+// reset current user to kernel (0) in system status table
+[SYSTEM_STATUS_TABLE + 0] = KERNEL;
+
+multipush(R6,R8,R10,R12,R15);
+    call SCHEDULER;
+multipop(R6,R8,R10,R12,R15);
+
+// logout never returns to user — shell restarts on next login
+// restore SP from process table (updated by scheduler)
+SP = [PROCESS_TABLE + currentPID*16 + 13];
+ireturn;
+
+RETURN:
+[PROCESS_TABLE + currentPID*16 + 9] = 0;
+SP = userSP;
+ireturn;
