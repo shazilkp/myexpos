@@ -1,0 +1,104 @@
+//Switch to the Kernel Stack.- backup
+//Save the value of SP to the USER SP field in the Process Table entry of the process
+[PROCESS_TABLE + [SYSTEM_STATUS_TABLE+1]*16 + 13]=SP; //logical address
+
+//Set the value of SP to the beginning of User Area Page.
+SP = [PROCESS_TABLE + [SYSTEM_STATUS_TABLE+1]*16 + 11]*512 -1 ; 
+//since kernel mode newly entered- Kernel stack is empty
+
+backup;
+
+
+//-------------------Pager Module-------------------
+//IF swapping initiated by the pager module
+if([ SYSTEM_STATUS_TABLE + 5]!=0) then
+    // /* Call Swap In/Out, if necessary */
+
+    // if the current process is the Swapper Daemon and Paging Status is SWAP_OUT,
+    if([SYSTEM_STATUS_TABLE+1] == SWAPPER_DAEMON  ) then
+    
+        if([SYSTEM_STATUS_TABLE+5] == SWAP_OUT) then
+            // Call the swap_out() function in the Pager Module.
+            // Arguments are PID
+            R1 = SWAP_OUT;
+            R2 = [SYSTEM_STATUS_TABLE+1];
+            call PAGER_MODULE;
+        else
+
+            // Call the swap_in() function in the Pager Module.
+            // Arguments are PID
+            R1 = SWAP_IN;
+            R2 = [SYSTEM_STATUS_TABLE+1];
+            call PAGER_MODULE;
+        endif;
+    endif;
+
+    // else ===> the current process is Idle,                          
+    //     /* Swapping is ongoing, but the daemon is blocked for some disk operation and idle is being run now */
+    //     /* Skip to the end to perform context switch. */
+else
+    // else ===> Swapping is not on now.  Check whether it must be initiated 
+    
+    //if (MEM_FREE_COUNT < MEM_LOW) then   
+    if([SYSTEM_STATUS_TABLE+2]<MEM_LOW) then  
+        // /* Swap Out to be invoked during next Timer Interrupt */
+        // Set the Paging Status in System Status Table to SWAP_OUT.
+        [SYSTEM_STATUS_TABLE + 5] = SWAP_OUT;
+
+    else 
+        // if (there are swapped out processes)            /* Check SWAPPED_COUNT in System Status Table */
+        if([SYSTEM_STATUS_TABLE + 4] > 0) then
+
+            //     if (Tick of any Swapped Out process > MAX_TICK or MEM_FREE_COUNT > MEM_HIGH)
+            alias base_addr R1;
+            base_addr = SHELL_PROCESS + 1; //start from 3rd process
+            base_addr = PROCESS_TABLE + base_addr*16;
+            alias maxi  R2;
+            maxi = PROCESS_TABLE + (MAX_PROC_NUM-1)*16;
+
+            while(base_addr < maxi) do //excluding swapper also
+                if([base_addr+6]==1 && ([base_addr]>MAX_TICK || [SYSTEM_STATUS_TABLE+2]>MEM_HIGH) ) then
+                    [SYSTEM_STATUS_TABLE + 5] = SWAP_IN;
+                    break;
+                endif;
+                base_addr = base_addr + 16;
+            endwhile;
+            //         /* Swap In to be invoked during next Timer Interrupt */
+            //         Set the Paging Status in System Status Table to SWAP_IN.
+        endif;
+
+    endif;
+endif;
+
+
+//Change the state of the current process in its Process Table entry from RUNNING to READY.
+[PROCESS_TABLE + [SYSTEM_STATUS_TABLE+1]*16  + 4] = READY;
+
+//Loop through the process table entires and increment the TICK field of each process.
+alias iter R1;
+R1 = SHELL_PROCESS + 1; //start from 3rd process
+while(R1 < MAX_PROC_NUM-1) do
+    if([PROCESS_TABLE + R1*16 + 4] != TERMINATED) then
+        [PROCESS_TABLE + R1*16] = [PROCESS_TABLE + R1*16] + 1;
+    endif;
+    R1 = R1 + 1;
+endwhile;
+
+
+//to check
+//print "TIMER";
+
+//call scheduler
+call MOD_5;
+
+
+//Restore the register context of the process using RESTORE instruction.
+restore;
+//no more using registers
+
+//kernel to user stack before exit
+SP = [PROCESS_TABLE + [SYSTEM_STATUS_TABLE+1]*16 + 13];
+
+//Set the MODE_FLAG in the process table entry to 0.
+[PROCESS_TABLE + [SYSTEM_STATUS_TABLE+1]*16 + 9] =0; 
+ireturn;

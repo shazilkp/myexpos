@@ -1,0 +1,68 @@
+//scheduler module
+
+
+[CONTEXT_SWITCH_COUNT] = [CONTEXT_SWITCH_COUNT] + 1;
+
+alias currentPID R0;
+currentPID = [SYSTEM_STATUS_TABLE + 1];
+
+
+multipush (BP);
+
+[PROCESS_TABLE + (currentPID*16) + 12] = SP % 512;       //kptr
+[PROCESS_TABLE + (currentPID*16) + 14] = PTBR;          //ptbr
+[PROCESS_TABLE + (currentPID*16) + 15] = PTLR;          //ptlr
+
+alias i R1;
+alias newPID R2;
+newPID = 0;
+if ([SYSTEM_STATUS_TABLE + 5] != 0) then
+    // paging is ongoing
+    if ([PROCESS_TABLE + 15*16 + 4] == WAIT_DISK) then
+        newPID = 0;
+    else
+        newPID = SWAPPER_DAEMON;
+    endif;
+else
+    i = currentPID + 1;
+    i = i % 16;
+
+    while(i != currentPID)do
+        if(i != 0 && i != SWAPPER_DAEMON)then
+            if(([PROCESS_TABLE + (i*16) + 4] == READY || [PROCESS_TABLE + (i*16) + 4] == CREATED) && [PROCESS_TABLE + (i*16) + 6] == 0) then
+                    newPID = i;
+                    break;
+                endif;
+        endif;
+        i = i + 1;
+        i = i % 16;
+    
+    endwhile;
+    if(i == currentPID)then
+        newPID = 0;
+    endif;
+endif;
+
+
+
+
+
+//sp = (uapn * 512 + kptr) of new process
+SP = ([PROCESS_TABLE + (newPID*16) + 11] * 512 ) + [PROCESS_TABLE + (newPID*16) + 12];
+
+PTBR = [PROCESS_TABLE + (newPID*16) + 14];          //ptbr
+PTLR = [PROCESS_TABLE + (newPID*16) + 15];
+
+[SYSTEM_STATUS_TABLE + 1] = newPID;
+
+if([PROCESS_TABLE + (newPID*16) + 4] == CREATED) then
+    SP = [PROCESS_TABLE + (newPID*16) + 13];        //uptr
+    [PROCESS_TABLE + (newPID*16) + 4] = RUNNING;
+    [PROCESS_TABLE + (newPID*16) + 9] = 0;          //SWAP flag
+    BP = [[PROCESS_TABLE + (newPID*16) + 11] * 512];
+    ireturn;
+endif;
+
+[PROCESS_TABLE + (newPID*16) + 4] = RUNNING;
+multipop (BP);
+return;

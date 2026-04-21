@@ -6,7 +6,6 @@ int main() {
 
     begin 
         user = 0;
-        breakpoint;
         while (user < 16) do 
             username = exposcall("Getuname", user);
             if (username != -1) then 

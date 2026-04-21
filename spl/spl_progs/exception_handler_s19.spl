@@ -69,12 +69,14 @@ else
 
             R1 = 5;             // Get Code Page
             R2 = blockNo;
+            // breakpoint;
             call MEMORY_MANAGER;
 
             multipop(EPN);
 
-            // print("here");
+            // print("page ");
             // print(R0);
+            // breakpoint;
 
             [PAGE_TABLE_BASE + 20 * [SYSTEM_STATUS_TABLE + 1] + EPN*2] = R0;
             [PAGE_TABLE_BASE + 20 * [SYSTEM_STATUS_TABLE + 1] + EPN*2 + 1] = "1100";

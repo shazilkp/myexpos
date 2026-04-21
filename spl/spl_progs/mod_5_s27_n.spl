@@ -1,0 +1,70 @@
+//get process id of current process
+alias currentPID R0;
+currentPID = [SYSTEM_STATUS_TABLE + 1];
+
+//push  BP to top of kernel stack
+multipush (BP);
+
+//get process table entry
+alias process_table_entry R1;
+process_table_entry = PROCESS_TABLE + currentPID*16;
+//Save SP % 512 in the kernel stack pointer field, also PTBR and PTLR into the corresponding fields in the Process Table entry.
+[process_table_entry + 12] = SP % 512;
+[process_table_entry + 14] = PTBR;
+[process_table_entry + 15] = PTLR;
+
+//scheduling algo
+alias newPID R2;
+if([SYSTEM_STATUS_TABLE+5] != 0) then //paging ongoing
+	// If the paging process is blocked     /* the paging process is executing a disk operation */
+	if([PROCESS_TABLE + 15*16 + 4] == WAIT_DISK) then
+        // Choose Idle Process for scheduling.
+		newPID = 0;
+    else
+        // Choose the Swapper Daemon to be scheduled.
+		newPID = SWAPPER_DAEMON;
+	endif;
+else
+	newPID=currentPID+1;
+	newPID = newPID%16;
+	while(newPID != currentPID) do
+		if(newPID!=0 && newPID != SWAPPER_DAEMON && [PROCESS_TABLE + newPID*16 + 6]==0) then
+			if([PROCESS_TABLE + newPID*16 + 4]==READY)  then
+				break;
+			endif;
+			if([PROCESS_TABLE + newPID*16 + 4]==CREATED)  then
+				break;
+			endif;
+
+		endif;
+		newPID = newPID+1;
+		newPID = newPID%16;
+	endwhile;
+	if(newPID == currentPID) then
+		newPID = 0;//idle
+	endif;
+endif;
+
+//restore sp, ptbr, ptlr
+alias new_process_table R3;
+new_process_table = PROCESS_TABLE + newPID*16;
+SP = [new_process_table + 11]*512 + [new_process_table + 12];//kptr
+PTBR = [new_process_table + 14];
+PTLR = [new_process_table + 15];
+//Set the PID of the new process in the current PID field of the System Status Table.
+[SYSTEM_STATUS_TABLE + 1] = newPID;
+
+if([new_process_table +4] == CREATED) then //nothing to restore
+    [new_process_table + 4] = RUNNING;
+    SP = [new_process_table + 13];
+	[new_process_table + 9] =0;
+	BP=[[new_process_table+11]*512];
+    ireturn;
+endif;
+//else: Set the state of the new process as RUNNING
+[new_process_table + 4] = RUNNING; // initially ready state
+
+//Restore the BP of the new process from the top of it's kernel stack.
+multipop (BP);
+
+return;

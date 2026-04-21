@@ -1,0 +1,230 @@
+alias functionNum R1;
+alias currentPID R2;
+
+
+
+
+
+
+//SWAP_OUT(1)
+if (functionNum == SWAP_OUT) then
+
+    alias PID R3;
+    alias sem_pid R4;
+    alias tick_pid R5;
+    alias high_tick R6;
+    alias proc_table_entry R7;
+    alias page_table R8;
+
+
+    PID = SHELL_PROCESS + 1;
+    sem_pid = -1;
+    tick_pid = -1;
+    high_tick = -1;
+
+    while (PID < MAX_PROC_NUM - 1) do
+        proc_table_entry = PROCESS_TABLE + 16*PID;
+        if ([proc_table_entry + 6] == 0) then
+
+            if([proc_table_entry + 4] == WAIT_PROCESS)then
+                break;
+            endif;
+
+            if([proc_table_entry + 4] == WAIT_SEMAPHORE)then
+                sem_pid = PID;
+            endif;
+
+            if([proc_table_entry + 0] > high_tick)then
+                high_tick = [proc_table_entry + 0];
+                tick_pid = PID;
+            endif;
+        endif; 
+        PID = PID + 1;
+    endwhile;
+
+    if (PID == MAX_PROC_NUM - 1) then
+        if(sem_pid == -1 && tick_pid == -1)then
+            [SYSTEM_STATUS_TABLE + 5] = 0;
+            return;
+        endif;
+
+        if(sem_pid != -1)then
+            PID = sem_pid;
+        else
+            PID = tick_pid;
+        endif;
+    endif;
+
+    proc_table_entry = PROCESS_TABLE + 16*PID;
+    
+    //reset TICK
+    [proc_table_entry + 0] = 0;
+
+    page_table = [proc_table_entry + 14];
+
+    //inalidate code pages by calling release_page()
+    //4,5,6,7 pages are code
+
+    alias i R4;
+    alias physical_page R5;
+    alias disk_map_base R6;
+
+    disk_map_base = DISK_MAP_TABLE + PID * 10;
+
+    i = 2;
+    while (i < 10) do
+        physical_page = [page_table + 2*i];
+
+        if (physical_page != -1) then
+            if (i >= 4 && i < 8) then
+                // Code pages: Just release
+                multipush(R1,R2,R3,R4,R5,R6,R7,R8);
+                R1 = RELEASE_PAGE;
+                R2 = physical_page;
+                call MEMORY_MANAGER;
+                multipop(R1,R2,R3,R4,R5,R6,R7,R8);
+                
+                [page_table + 2*i] = -1;
+                [page_table + 2*i + 1] = "0000";
+            else
+                // Heap (2,3) and Stack (8,9)
+                // Only swap out if Heap is NOT shared OR if it is Stack
+                if ((i < 4 && [MEMORY_FREE_LIST + physical_page] == 1) || (i >= 8)) then
+                    multipush(R1,R2,R3,R4,R5,R6,R7,R8);
+                    R1 = GET_SWAP_BLOCK;
+                    call MEMORY_MANAGER;
+                    multipop(R1,R2,R3,R4,R5,R6,R7,R8);
+
+                    [disk_map_base + i] = R0;
+
+                    multipush(R1,R2,R3,R4,R5,R6,R7,R8);
+                    R1 = DISK_STORE;
+                    R2 = currentPID; // Use currentPID (R2) as the calling process
+                    R3 = physical_page;
+                    R4 = R0;
+                    call DEVICE_MANAGER;
+                    multipop(R1,R2,R3,R4,R5,R6,R7,R8);
+                    
+                    // Release and invalidate only after swapping
+                    multipush(R1,R2,R3,R4,R5,R6,R7,R8);
+                    R1 = RELEASE_PAGE;
+                    R2 = physical_page;
+                    call MEMORY_MANAGER;
+                    multipop(R1,R2,R3,R4,R5,R6,R7,R8);
+
+                    [page_table + 2*i] = -1;
+                    [page_table + 2*i + 1] = "0000";
+                endif;
+            endif;
+        endif;
+        i = i + 1;
+    endwhile;
+
+    //swap flag = 1
+    [proc_table_entry + 6] = 1;
+
+    //increment swapped count
+    [SYSTEM_STATUS_TABLE + 4] = [SYSTEM_STATUS_TABLE + 4] + 1;
+
+    //reset paging status
+    [SYSTEM_STATUS_TABLE + 5] = 0;
+    return;
+
+endif;
+
+//SWAP_IN(2)
+if (functionNum == SWAP_IN) then
+
+    alias PID R3;
+    alias tick_pid R4;
+    alias high_tick R5;
+    alias proc_table_entry R6;
+    alias page_table R7;
+
+    PID = SHELL_PROCESS + 1;
+    tick_pid = -1;
+    high_tick = -1;
+
+
+    while (PID < MAX_PROC_NUM - 1) do
+        proc_table_entry = PROCESS_TABLE + 16*PID;
+        // swapped process in ready state
+        if ([proc_table_entry + 6] == 1 && [proc_table_entry + 4] == READY) then
+            //highest tick
+            if([proc_table_entry + 0] > high_tick)then
+                high_tick = [proc_table_entry + 0];
+                tick_pid = PID;
+            endif;
+        endif; 
+        PID = PID + 1;
+    endwhile;
+
+    if(tick_pid == -1)then
+        [SYSTEM_STATUS_TABLE + 5] = 0;
+        return;
+    endif;
+
+    PID = tick_pid;
+    proc_table_entry = PROCESS_TABLE + 16*PID;
+    page_table = [proc_table_entry + 14];
+
+    //reset TICK
+    [proc_table_entry + 0] = 0;
+
+    alias i R4;
+    alias disk_map_base R5;
+    
+
+    disk_map_base = DISK_MAP_TABLE + PID * 10;
+
+    i = 2;
+    while (i < 10) do
+        // Only Heap and Stack need to be loaded
+        if (i < 4 || i >= 8) then
+            alias block_num R8;
+            block_num = [disk_map_base + i];
+
+            // Only load if there is a valid block on disk
+            if (block_num != -1) then
+                multipush(R1,R2,R3,R4,R5,R6,R7,R8);
+                R1 = GET_FREE_PAGE;
+                call MEMORY_MANAGER;
+                // R0 now has the free page
+                R9 = R0; 
+                multipop(R1,R2,R3,R4,R5,R6,R7,R8);
+
+                // Load block to page
+                multipush(R1,R2,R3,R4,R5,R6,R7,R8,R9);
+                R1 = DISK_LOAD;
+                R2 = currentPID;
+                R3 = R9; // The free page we just got
+                R4 = block_num;
+                call DEVICE_MANAGER;
+                multipop(R1,R2,R3,R4,R5,R6,R7,R8,R9);
+
+                // Release the swap block
+                multipush(R1,R2,R3,R4,R5,R6,R7,R8,R9);
+                R1 = RELEASE_BLOCK;
+                R2 = block_num;
+                R3 = currentPID;
+                call MEMORY_MANAGER;
+                multipop(R1,R2,R3,R4,R5,R6,R7,R8,R9);
+
+                [page_table + 2*i] = R9;
+                [page_table + 2*i + 1] = "0110";
+                [disk_map_base + i] = -1;
+            endif;
+        endif;
+        i = i + 1;
+    endwhile;
+
+    //swap flag = 0
+    [proc_table_entry + 6] = 0;
+
+    //decrement swapped count
+    [SYSTEM_STATUS_TABLE + 4] = [SYSTEM_STATUS_TABLE + 4] - 1;
+
+    //reset paging status
+    [SYSTEM_STATUS_TABLE + 5] = 0;
+    return;
+endif;

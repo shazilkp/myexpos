@@ -14,7 +14,7 @@ if(fnno==1) then
     while([SYSTEM_STATUS_TABLE+2]==0) do
         [PROCESS_TABLE+16*[SYSTEM_STATUS_TABLE+1]+4]=WAIT_MEM;
         multipush(R1);
-        call SCHEDULER;//scheduler
+        call MOD_5;//scheduler
         multipop(R1);
     endwhile;
         
@@ -32,7 +32,6 @@ if(fnno==1) then
     R0=R2-57*512; //page no of the free page
 
         //v) Return to the caller
-    // breakpoint;
     return;
 endif;
 
@@ -55,7 +54,96 @@ if(fnno==2) then
         R3=R3+1;
     endwhile;
     //iv)  Return to the caller
-    // breakpoint;
+    return;
+endif;
+
+//GET FREE BLOCK fn :3
+// loop through entries in the Disk Free List from DISK_FREE_AREA to DISK_SWAP_AREA - 1{   /* User Block, not preallocated to the OS or swap area */
+//     if ( a free entry is found ){
+//             Set the Disk Free List entry as 1;
+//             Return the corresponding block number;
+//     }
+// }
+// return -1;
+if(fnno == 3) then
+        alias blockno R2;
+        blockno = DISK_FREE_AREA;
+        while(blockno < DISK_SWAP_AREA) do
+            if([DISK_FREE_LIST+blockno] == 0) then
+                [DISK_FREE_LIST+blockno] = 1;
+                R0 = blockno;
+                return;
+            endif;
+            blockno = blockno + 1;
+        endwhile;
+        R0 = -1;
+        return;
+endif;
+
+
+//RELEASE BLOCK fn: 4
+if(fnno == 4)   then
+    [DISK_FREE_LIST+R2]=[DISK_FREE_LIST+R2]-1;
+    return;
+endif;
+
+//GET CODE PG fn: 5
+if(fnno==5) then
+    alias blockno R2;
+    R3=0;
+    while(R3<160)   do
+        if([R3+DISK_MAP_TABLE]==blockno)   then
+            R4=R3/10; //process id
+            R5=R3%10;  // to get the code block no
+            if([PAGE_TABLE_BASE+R4*20+R5*2]!=-1)    then
+                R0=[PAGE_TABLE_BASE+R4*20+R5*2];    //corresponding mem pg no from page table
+                [57*512 + R0]=[57*512 + R0]+1;
+                return;
+            endif;
+        endif;
+        R3=R3+1;
+    endwhile;
+
+    //else
+    multipush(R0,R1,R2);
+    R1=1;
+    call MOD_2;//get free pg fn in MEMORY MANAGER
+    R3=R0;//MEM pg no
+    multipop(R0,R1,R2);
+
+    multipush(R0,R1,R2,R3);
+    R4=blockno;//R2 value
+    R1=2;
+    R2=[SYSTEM_STATUS_TABLE+1];
+    R3=R3;
+    call MOD_4; //Disk Load fn in DEVICE MANAGER
+    multipop(R0,R1,R2,R3);
+
+    R0=R3;//returning pg no
+    
+    return;
+endif;
+
+//GET SWAP BLOCK PG fn: 6
+// loop through entries in the Disk Free List from DISK_SWAP_AREA to DISK_SIZE - 1{    /* swap area */
+//     if ( a free entry is found ){
+//             Set the Disk Free List entry as 1;
+//             Return the corresponding block number;
+//     }
+// }
+// return -1;
+if(fnno == 6) then
+    alias blno R2;
+    blno = DISK_SWAP_AREA;
+    while(blno < DISK_SIZE) do
+        if([DISK_FREE_LIST+blno] == 0) then
+            [DISK_FREE_LIST+blno] = 1;
+            R0 = blno;
+            return;
+        endif;
+        blno = blno + 1;
+    endwhile; 
+    R0 = -1;
     return;
 endif;
 

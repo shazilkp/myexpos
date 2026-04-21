@@ -10,8 +10,8 @@ alias PID R2;
 
 ///GET_PCB_ENTRY
 if(fnno == 1) then
-    R0=0;
-    while(R0<16) do
+    R0=3;
+    while(R0<15) do
         if([PROCESS_TABLE+R0*16 + 4] == TERMINATED) then
             [PROCESS_TABLE+R0*16 + 1]=R0;//pid
             [PROCESS_TABLE+R0*16 + 4]=ALLOCATED;//state

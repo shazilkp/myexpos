@@ -1,0 +1,141 @@
+
+//load idle code to memmory
+loadi(69,11);
+loadi(70,12);
+
+//load boot module
+loadi(54,67);
+loadi(55,68);
+
+//top of kernal stack
+SP = 76*512 - 1;        
+
+
+call BOOT_MODULE;
+
+
+
+
+//setting up of idle process
+
+//as PID of idle process is 0
+PTBR=PAGE_TABLE_BASE;  
+
+//Library
+[PTBR+0] = -1;
+[PTBR+1] = "0000";
+[PTBR+2] = -1;
+[PTBR+3] = "0000";
+
+//Heap
+[PTBR+4] = -1;
+[PTBR+5] = "0000";
+[PTBR+6] = -1;
+[PTBR+7] = "0000";
+
+//Code
+[PTBR+8] = 69;
+[PTBR+9] = "0100";
+[PTBR+10] = -1;
+[PTBR+11] = "0000";
+[PTBR+12] = -1;
+[PTBR+13] = "0000";
+[PTBR+14] = -1;
+[PTBR+15] = "0000";
+
+//Stack
+[PTBR+16] = 70;
+[PTBR+17] = "0110";
+[PTBR+18] = -1;
+[PTBR+19] = "0000";
+
+//page table of idle done
+
+
+//Process Table for IDLE
+[PROCESS_TABLE + 0] = 0;    //TICK
+[PROCESS_TABLE + 1] = 0; //PID
+[PROCESS_TABLE + 4] = RUNNING; //State
+[PROCESS_TABLE + 11] = 76; //User Area Page Number
+[PROCESS_TABLE + 13] = 8*512; //UPTR
+[PROCESS_TABLE + 12] = 0; //KPTR
+[PROCESS_TABLE + 14] = PAGE_TABLE_BASE; //PTBR
+[PROCESS_TABLE + 15] = 10; //PTLR
+
+
+
+//PER PROCEESS RESOURCE TABLE
+alias rt_base R1;
+alias rt_i    R2;
+rt_base = [PROCESS_TABLE + 11]*512 + RESOURCE_TABLE_OFFSET;
+rt_i = 0;
+while(rt_i < 16) do
+    [rt_base + rt_i] = -1;
+    rt_i = rt_i + 1;
+endwhile;
+
+//System status table
+
+[70 * 512] = [69*512 + 1]; 
+
+
+//initialise the swapper daemon
+PTBR=PAGE_TABLE_BASE + 20*15;  
+
+//Library
+[PTBR+0] = -1;
+[PTBR+1] = "0000";
+[PTBR+2] = -1;
+[PTBR+3] = "0000";
+
+//Heap
+[PTBR+4] = -1;
+[PTBR+5] = "0000";
+[PTBR+6] = -1;
+[PTBR+7] = "0000";
+
+//Code
+[PTBR+8] = 69;
+[PTBR+9] = "0100";
+[PTBR+10] = -1;
+[PTBR+11] = "0000";
+[PTBR+12] = -1;
+[PTBR+13] = "0000";
+[PTBR+14] = -1;
+[PTBR+15] = "0000";
+
+//Stack
+[PTBR+16] = 81;
+[PTBR+17] = "0110";
+[PTBR+18] = -1;
+[PTBR+19] = "0000";
+
+//page table of idle done
+
+
+//Process Table for IDLE
+
+alias pt_base R1;
+pt_base = PROCESS_TABLE + 16*15;
+
+[pt_base + 0] = 0;
+[pt_base + 1] = 15; //PID
+[pt_base + 3] = 0;    //userid
+[pt_base + 4] = CREATED; //State
+[pt_base + 11] = 82; //User Area Page Number
+[pt_base + 13] = 8*512; //UPTR
+[pt_base + 12] = 0; //KPTR
+[pt_base + 14] = PAGE_TABLE_BASE + 20*15; //PTBR
+[pt_base + 15] = 10; //PTLR
+
+[81*512] = [69*512 +1];
+
+
+PTBR = PAGE_TABLE_BASE;
+PTLR = 10;
+[SYSTEM_STATUS_TABLE + 1] = 0;	// IDLE Process PID 0 
+
+SP = 8*512;
+
+
+ireturn;

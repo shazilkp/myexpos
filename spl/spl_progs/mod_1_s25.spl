@@ -8,14 +8,14 @@ alias currentPID R2;
 if(functionNum == 1)  then
     alias PID R0;
     PID = 0;
-    while(PID < 16)do
+    while(PID < 15)do
         if([PROCESS_TABLE + 16 * PID + 4] == TERMINATED)then
             break;
         endif;
         PID = PID + 1;
     endwhile;
 
-    if(PID > 15)then
+    if(PID > 14)then
         PID = -1;
         return;
     endif;

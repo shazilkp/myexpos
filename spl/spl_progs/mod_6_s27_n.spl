@@ -1,0 +1,223 @@
+//PAGER MODULE
+alias fnno R1;
+alias processid R2;
+
+if(fnno == SWAP_OUT) then
+
+    // Choose a process to swap out. (other than the IDLE, Shell or INIT)
+        
+    // Loop through the Process Table and find a non-swapped process that is in the WAIT_PROCESS state.
+    alias base_addr R5;
+    base_addr = SHELL_PROCESS + 1; //start from 3rd process
+    base_addr = PROCESS_TABLE + base_addr*16;
+
+
+    alias pid R3;
+    pid = SHELL_PROCESS + 1;
+
+    alias sem_pid  R8;
+    R8 =-1;
+
+    pid = SHELL_PROCESS + 1;
+    alias highesttick R7;
+    alias reqpid R6;
+    reqpid = -1;
+    highesttick = -1;
+    while(pid < SWAPPER_DAEMON)  do
+        if([base_addr+6]==0 && [base_addr + 4] == WAIT_PROCESS) then
+            break;
+        endif;
+
+        if([base_addr+6]==0 && [base_addr + 4] == WAIT_SEMAPHORE) then
+            sem_pid = pid;
+        endif;
+
+        if([base_addr+6]==0 && [base_addr + 4] != TERMINATED && [base_addr + 4] != RUNNING && [base_addr + 4] != ALLOCATED ) then
+            if([base_addr]>highesttick) then
+                highesttick = [base_addr];
+                reqpid = pid;
+            endif;
+        endif;
+        base_addr = base_addr + 16;
+        pid = pid+1;
+    endwhile;
+
+      
+    /// Process found and in pid 
+
+    //If no such process exists, set PAGING_STATUS back to 0 and return
+    if(pid == SWAPPER_DAEMON) then
+        if(sem_pid != -1) then
+            pid = sem_pid;
+        else
+            if(reqpid!=-1) then
+                pid = reqpid;
+            else
+                [SYSTEM_STATUS_TABLE + 5] = 0;
+                return;
+            endif;
+        endif;
+    endif;
+
+    // Set the TICK field of the process table entry of the selected process to 0.
+    // /* When the process goes to swap, TICK starts again */
+    base_addr = PROCESS_TABLE + pid*16;
+    [base_addr] = 0;
+
+    //deallocate code pages
+    alias page_table_entry R4;
+    R4 = [base_addr+14];
+    
+    //Disk map table entry
+    alias disk_map_entry R6;
+    R6 = DISK_MAP_TABLE + pid*10;
+
+    //until now used regs: R1,R2....R6
+
+    //Deallocate heap pages & Stack pages
+    // For each heap page that is not shared and is valid 
+    R7 = 4;
+    while(R7 < 20) do
+        if((R7<8 && [R4+R7] != -1 && [MEMORY_FREE_LIST + [R4+R7]] == 1) || (R7>=16 && [R4+R7] != -1)) then
+            // { /* Shared heap pages are not swapped out. */
+            // Get a free swap block by calling the get_swap_block() function in the Memory Manager module.
+            multipush(R1,R2,R3,R4,R5,R6,R7);
+            R1 = GET_SWAP_BLOCK;
+            call MEMORY_MANAGER; //mod 2
+            multipop(R1,R2,R3,R4,R5,R6,R7);
+
+            // Store the disk block number in the Disk Map Table entry of the process curresponding to the heap page.
+            [R6+(R7/2)] = R0;
+            // Use the disk_store() function in the Device Manager module to write the heap page to the block found above
+            multipush(R1,R2,R3,R4,R5,R6,R7);
+            R1 = DISK_STORE;
+            R2 = processid;
+            R3 = [R4+R7];
+            R4 = R0;
+            call DEVICE_MANAGER; //mod 3
+            multipop(R1,R2,R3,R4,R5,R6,R7);
+        endif;
+        if([R4+R7] != -1) then
+            // Call the release_page() function in the Memory Manager module to deallocate the page.
+            multipush(R1,R2,R3,R4,R5,R6,R7);
+            R1 = RELEASE_PAGE;
+            R2 = [R4+R7];
+            call MEMORY_MANAGER; //mod 2
+            multipop(R1,R2,R3,R4,R5,R6,R7);
+
+            // Invalidate the Page table entry correpsonding to the page.
+            [R4+R7] = -1;
+            [R4+R7+1] = "0000";
+        endif;
+        R7 = R7+2;
+    endwhile;
+
+
+    // Set the SWAP_FLAG field in the process table entry of the process to 1
+    [base_addr + 6] = 1;
+
+    // In the System Status Table, increment the SWAP_COUNT and reset the PAGING_STATUS back to 0.   
+    // /* The scheduler can now resume normal scheduling */ 
+    [SYSTEM_STATUS_TABLE + 4] = [SYSTEM_STATUS_TABLE + 4] + 1;
+    [SYSTEM_STATUS_TABLE + 5] = 0;
+
+    return;
+
+endif;
+
+if(fnno == SWAP_IN) then
+
+    // Find if any swapped out process can be made ready to run if brought into memory. */
+    // Loop through the Process Table and find the swapped process in the READY state with the highest TICK.
+    alias pid R3;
+    pid = SHELL_PROCESS + 1;
+    alias base_addr R4;
+    base_addr = PROCESS_TABLE + pid*16;
+
+    //----------temporary regs----------------
+    alias reqpid R5;
+    reqpid = -1;
+    alias highest_tick R6;
+    highest_tick = -1;
+    while(pid < SWAPPER_DAEMON)  do
+        if([base_addr+6]!=0 && [base_addr + 4] == READY) then
+            if([base_addr] > highest_tick) then
+                highest_tick = [base_addr];
+                reqpid = pid;
+            endif;
+        endif;
+        base_addr = base_addr + 16;
+        pid = pid+1;
+    endwhile;
+    pid = reqpid;
+
+    // If there is no such process in the READY state, reset the PAGING_STATUS field to 0 and Return.
+    if(pid == -1) then
+        [SYSTEM_STATUS_TABLE + 5] = 0;
+        return;
+    endif;
+
+    base_addr = PROCESS_TABLE + pid*16;
+    //------preserve: R1,R2,R3,R4-------------
+    //Set the TICK field of the process table entry of the selected process to 0.
+    [base_addr] = 0;
+
+    alias page_table_entry R5;
+    R5= [base_addr+14];
+
+    alias disk_map_entry R6;
+    R6 = DISK_MAP_TABLE + pid*10;
+
+    //For each  page that is swapped  out (heap and stack)
+    R7 = 4;
+    while(R7 < 20) do
+        if(R7>=16 || (R7<8 && [disk_map_entry+R7/2]!=-1)) then
+            // Call the get_free_page() function in the Memory Manager module to allocate a memory page.
+            multipush(R1,R2,R3,R4,R5,R6,R7);
+            R1 = GET_FREE_PAGE;
+            call MEMORY_MANAGER; //mod 2
+            multipop(R1,R2,R3,R4,R5,R6,R7);
+            R8 = R0;
+            alias pgno R8;
+
+            // Get the disk block number in the Disk Map Table entry of the process corresponding to the heap page.
+            alias blno R9;
+            blno = [disk_map_entry+R7/2];
+
+            // Use the disk_load() function in the Device Manager module to copy the heap page found above to the memory.
+            multipush(R1,R2,R3,R4,R5,R6,R7,R8,R9);
+            R1 = DISK_LOAD;
+            R2 = processid;
+            R3 = pgno;
+            R4 = blno;
+            call DEVICE_MANAGER; //mod 3
+            multipop(R1,R2,R3,R4,R5,R6,R7,R8,R9);
+
+            // Set the Page table entry correpsonding to the page. Reference bit is set to 0, valid bit and write bit are set to 1.
+            [page_table_entry+R7] = pgno;
+            [page_table_entry+R7+1] = "0110";
+
+            // Free the swap block by calling the release_block() function in the Memory Manager module.
+            multipush(R1,R2,R3,R4,R5,R6,R7);
+            R1=RELEASE_BLOCK;
+            R2=blno;
+            R3=processid;
+            call MEMORY_MANAGER; //mod 2
+            multipop(R1,R2,R3,R4,R5,R6,R7);
+            
+            // Invalidate the Disk Map Table entry corresponding to the  page.
+            [disk_map_entry+R7/2] = -1;
+        endif;
+        R7=R7+2;
+    endwhile;
+
+    // Set the SWAP_FLAG field in the process table entry of the process to 0.
+    [base_addr + 6] = 0;
+
+    //In the System Status Table, decrement the SWAP_COUNT and reset the PAGING_STATUS back to 0.   
+    ///* The scheduler can now resume normal scheduling */ 
+    [SYSTEM_STATUS_TABLE + 4] = [SYSTEM_STATUS_TABLE + 4] - 1;
+    [SYSTEM_STATUS_TABLE + 5] = 0;
+
+    return;
+endif;

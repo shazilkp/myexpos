@@ -52,6 +52,7 @@ if(syscall_no == INT_SEMLOCK) then
     [pt_sst + 9]=0;
     //switch to user stack
     SP=userSP;
+    // breakpoint;
 
     //return 0
     [[PTBR + ((userSP -1)/512)*2]*512 + (userSP -1)%512] = 0; 

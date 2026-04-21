@@ -1,0 +1,315 @@
+
+//load library code into 63 and 64 pages
+//this will be page 0 and 1 of our process
+loadi(63,13);
+loadi(64,14);
+
+//load the init program
+loadi(65,7);
+loadi(66,8);
+
+//load int 10 handler
+loadi(22,35);
+loadi(23,36);
+
+//loading exception handler
+loadi(2, 15);
+loadi(3, 16);
+
+//load the timer interupt
+loadi(4, 17);
+loadi(5, 18);
+
+//load int7 handler
+loadi(16,29);
+loadi(17,30);
+
+
+//load module 5 - scheduler
+loadi(50,63);
+loadi(51,64);
+
+//load the even program
+loadi(83,69);
+
+
+//load module 0 - resource allocater
+loadi(40,53);
+loadi(41,54);
+
+//load module 4 - device manager module
+loadi(48,61);
+loadi(49,62);
+
+
+//s16
+//load the console interrupt
+loadi(8,21);
+loadi(9,22);
+
+//load int6 handler
+loadi(14,27);
+loadi(15,28);
+
+
+//s17
+//int 9 handler
+loadi(20,33);
+loadi(21,34);
+
+//load module 1 - process manager module
+loadi(42,55);
+loadi(43,56);
+
+//load module 2 - memory manager module
+loadi(44,57);
+loadi(45,58);
+
+//inode table+user table
+loadi(59,3);
+loadi(60,4);
+
+
+//s18
+//load the disk interrupt
+loadi(6,19);
+loadi(7,20);
+
+
+//s19
+//Disk Free List
+loadi(61, 2);
+
+
+//s20
+//load int 8 handler
+loadi(18,31);
+loadi(19,32);
+
+//s21
+//load int 11 handler
+loadi(24,37);
+loadi(25,38);
+
+//load int 15 handler
+loadi(32,45);
+loadi(33,46);
+
+
+//s22
+//load in 13 handler
+loadi(28,41);
+loadi(29,42);
+
+//load in 14 handler
+loadi(30,43);
+loadi(31,44);
+
+//s23
+//load int 4 handler
+loadi(10, 23);
+loadi(11, 24);
+
+//load Root file
+loadi(62, 5);
+
+//s24
+//load int 5
+loadi(12,25);
+loadi(13,26);
+
+//load module 3 - File Manager
+loadi(46,59);
+loadi(47,60);
+
+//s26
+//load int 12
+loadi(26,39);
+loadi(27,40);
+
+//load int 16
+loadi(34,47);
+loadi(35,48);
+
+//load int 17
+loadi(36,49);
+loadi(37,50);
+
+//shell
+loadi(67,9);
+loadi(68,10);
+
+//s27
+//load module 6 - pager
+loadi(52,65);
+loadi(53,66);
+
+
+////////////// INIT PROCESS /////////////////////////////////////////////////////////////
+alias ptbr_init R0;
+ptbr_init = PAGE_TABLE_BASE + 20;
+
+
+[ptbr_init + 0]  = 63;     [ptbr_init + 1]  = "0100";   // library pg0
+[ptbr_init + 2]  = 64;     [ptbr_init + 3]  = "0100";   // library pg1
+[ptbr_init + 4]  = -1;     [ptbr_init + 5]  = "0000";   // heap (unused)
+[ptbr_init + 6]  = -1;     [ptbr_init + 7]  = "0000";
+[ptbr_init + 8]  = 65;     [ptbr_init + 9]  = "0100";   // code pg4
+[ptbr_init + 10] = -1;     [ptbr_init + 11] = "0000";   // code pg5 (unused)
+[ptbr_init + 12] = -1;     [ptbr_init + 13] = "0000";   // pg6 unused
+[ptbr_init + 14] = -1;     [ptbr_init + 15] = "0000";   // pg7 unused
+[ptbr_init + 16] = 66;     [ptbr_init + 17] = "0110";   // stack pg8
+[ptbr_init + 18] = -1;     [ptbr_init + 19] = "0000";   // stack pg9 (unused)
+
+// Process Table for INIT (PID=1, base offset = 16)
+alias pt_init R1;
+pt_init = PROCESS_TABLE + 16;
+[pt_init + 1]  = 1;                    // PID
+[pt_init + 3]  = KERNEL;               // UserID
+[pt_init + 4]  = CREATED;             // State
+[pt_init + 11] = 77;                   // User Area Page Number
+[pt_init + 12] = 0;                    // KPTR
+[pt_init + 13] = 8 * 512;             // UPTR
+[pt_init + 14] = ptbr_init;           // PTBR (reuse register)
+[pt_init + 15] = 10;                   // PTLR
+
+[66 * 512] = [65 * 512 + 1];          // copy return addr to init stack
+[TERMINAL_STATUS_TABLE] = 0;
+
+// Initialize the TICK field to 0 for all the 16 process table entries.
+[PROCESS_TABLE] = 0;
+[PROCESS_TABLE + 16] = 0;
+[PROCESS_TABLE + 2*16] = 0;
+
+// Mark PIDs 3..15 as TERMINATED
+alias pt_base R1;
+alias i R2;
+i = 3;
+while (i <= 15) do
+    pt_base = PROCESS_TABLE + i * 16;
+    [pt_base + 4] = TERMINATED;
+    [pt_base + 0] = 0;               //TICK
+    i = i + 1;
+endwhile;
+
+[DISK_STATUS_TABLE] = 0;
+
+// Memory free list: pages 0..77 = 1 (in use), 78..127 = 0 (free)
+i = 0;
+while (i <= 77) do
+    [MEMORY_FREE_LIST + i] = 1;
+    i = i + 1;
+endwhile;
+while (i <= 127) do
+    [MEMORY_FREE_LIST + i] = 0;
+    i = i + 1;
+endwhile;
+
+// Per-process resource table of INIT: last 16 words of UAPN page = -1
+alias uapn R3;
+uapn = [PROCESS_TABLE + 16 + 11];                // 
+alias base R4;
+base = (uapn + 1) * 512;
+i = 1;
+while (i < 9) do
+    [base - 2 * i] = -1;
+    i = i + 1;
+endwhile;
+
+// Semaphore table
+alias sem_base R5;
+i = 0;
+while (i < MAX_SEM_COUNT) do
+    sem_base = SEMAPHORE_TABLE + 4 * i;
+    [sem_base]     = -1;   // LOCKING_PID
+    [sem_base + 1] = 0;    // PROCESS_COUNT
+    i = i + 1;
+endwhile;
+
+// File status table
+alias fst_base R5;
+i = 0;
+while (i < MAX_FILE_NUM) do
+    fst_base = FILE_STATUS_TABLE + 4 * i;
+    [fst_base]     = -1;
+    [fst_base + 1] = -1;
+    i = i + 1;
+endwhile;
+
+// Buffer table
+alias buf_base R5;
+i = 0;
+while (i < MAX_BUFFER) do
+    buf_base = BUFFER_TABLE + 4 * i;
+    [buf_base]     = -1;   // block number
+    [buf_base + 1] = 0;    // dirty bit
+    [buf_base + 2] = -1;   // locking PID
+    i = i + 1;
+endwhile;
+
+// Open file table
+alias oft_base R5;
+i = 0;
+while (i < MAX_OPENFILE_NUM) do
+    oft_base = OPEN_FILE_TABLE + 4 * i;
+    [oft_base]     = -1;   // inode index
+    [oft_base + 1] = 0;    // open instance count
+    i = i + 1;
+endwhile;
+
+// SHELL PROCESS /////////////////////////////////////////////////////////
+alias ptbr_shell R0;
+ptbr_shell = PAGE_TABLE_BASE + 40;
+
+
+[ptbr_shell + 0]  = 63;    [ptbr_shell + 1]  = "0100";   // library pg0
+[ptbr_shell + 2]  = 64;    [ptbr_shell + 3]  = "0100";   // library pg1
+[ptbr_shell + 4]  = -1;    [ptbr_shell + 5]  = "0000";   // heap (unused)
+[ptbr_shell + 6]  = -1;    [ptbr_shell + 7]  = "0000";
+[ptbr_shell + 8]  = 67;    [ptbr_shell + 9]  = "0100";   // code pg4
+[ptbr_shell + 10] = 68;    [ptbr_shell + 11] = "0100";   // code pg5
+[ptbr_shell + 12] = -1;    [ptbr_shell + 13] = "0000";
+[ptbr_shell + 14] = -1;    [ptbr_shell + 15] = "0000";
+[ptbr_shell + 16] = 78;    [ptbr_shell + 17] = "0110";   // stack pg8
+[ptbr_shell + 18] = 79;    [ptbr_shell + 19] = "0110";   // stack pg9
+
+[78 * 512] = [67 * 512 + 1];          // copy return addr to shell stack
+
+// Process Table for SHELL (PID=2, base offset = 32)
+alias pt_shell R1;
+pt_shell = PROCESS_TABLE + 32;
+[pt_shell + 1]  = 2;                   // PID
+[pt_shell + 2]  = 1;                   // PPID
+[pt_shell + 4]  = TERMINATED;          // STATE
+[pt_shell + 11] = 80;                  // UAPN
+[pt_shell + 12] = 0;                   // KPTR
+[pt_shell + 13] = 8 * 512;            // UPTR
+[pt_shell + 14] = ptbr_shell;         // PTBR
+[pt_shell + 15] = 10;                  // PTLR
+
+// Disk map table for shell (PID=2, slot index=10 => offset 20)
+alias dmt_shell R3;
+dmt_shell = DISK_MAP_TABLE + 20;
+i = 0;
+while (i < 9) do
+    [dmt_shell + i] = -1;
+    i = i + 1;
+endwhile;
+[dmt_shell + 4] = 9;
+[dmt_shell + 5] = 10;
+
+[MEMORY_FREE_LIST + 78] = 1;
+[MEMORY_FREE_LIST + 79] = 1;
+[MEMORY_FREE_LIST + 80] = 1;
+
+// System status
+[SYSTEM_STATUS_TABLE + 2] = 45;         // mem free count
+[SYSTEM_STATUS_TABLE + 3] = 0;          // mem wait count
+[SYSTEM_STATUS_TABLE + 4] = 0;          // swapped count
+[SYSTEM_STATUS_TABLE + 5] = 0;          // paging status
+// Telemetry counters
+[MIN_MEM_USAGE]        = 45;
+[DISK_ACCESS_COUNT]    = 0;
+[CONTEXT_SWITCH_COUNT] = 0;
+
+return;

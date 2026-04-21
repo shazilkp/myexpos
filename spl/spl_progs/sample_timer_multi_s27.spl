@@ -1,0 +1,88 @@
+//storing the user stack pointer into usptr(13th word) of the process tav-ble entry accessed using pid
+//from the system status table
+
+[PROCESS_TABLE + ( [SYSTEM_STATUS_TABLE + 1] * 16) + 13] = SP;
+
+//setting the last address in kernal stack(since empty and stack grows downwards????)
+SP = [PROCESS_TABLE + ([SYSTEM_STATUS_TABLE + 1] * 16) + 11] * 512 - 1;
+backup;
+
+//interrupt handler code
+
+
+alias currentPID R3;
+currentPID = [SYSTEM_STATUS_TABLE+1];
+
+alias process_table_entry R1;
+process_table_entry = PROCESS_TABLE + currentPID * 16;
+
+alias i R2;
+//if swappig is initiated
+if ([SYSTEM_STATUS_TABLE + 5] != 0) then
+    if ([SYSTEM_STATUS_TABLE + 1] == SWAPPER_DAEMON) then
+        if ([SYSTEM_STATUS_TABLE + 5] == SWAP_OUT) then
+            //call swap_out() from pager module
+            multipush(R1,R2,R3);
+                R1 = SWAP_OUT;
+                R2 = [SYSTEM_STATUS_TABLE + 1];
+                call PAGER_MODULE;
+            multipop(R1,R2,R3);
+        else
+
+            if ([SYSTEM_STATUS_TABLE + 5] == SWAP_IN) then
+                //call swap_in() from pager module
+                multipush(R1,R2,R3);
+                    R1 = SWAP_IN;
+                    R2 = [SYSTEM_STATUS_TABLE + 1];
+                    call PAGER_MODULE;
+                multipop(R1,R2,R3);
+                endif;
+        endif;
+    // else
+    //     if ([SYSTEM_STATUS_TABLE + 1] == IDLE_PROCESS) then
+                // /* Swapping is ongoing, but the daemon is blocked for some disk operation and idle is being run now */
+    //     /* Skip to the end to perform context switch. */
+    //     endif;
+    endif;
+else
+    // /* Swapping is not on now.  Check whether it must be initiated */
+    if ([SYSTEM_STATUS_TABLE + 2] < MEM_LOW) then
+        [SYSTEM_STATUS_TABLE + 5] = SWAP_OUT;
+    else
+        if ([SYSTEM_STATUS_TABLE + 4] > 0) then
+            i = SHELL_PROCESS + 1;
+            while ( i < MAX_PROC_NUM - 1) do
+                if ([PROCESS_TABLE + i*16 + 6] ==  1 && ([PROCESS_TABLE + i*16 + 0] > MAX_TICK || [SYSTEM_STATUS_TABLE + 2] > MEM_HIGH)) then
+                    [SYSTEM_STATUS_TABLE + 5] = SWAP_IN;
+                    break;
+                endif;
+                i = i + 1;
+            endwhile;
+        endif;
+    endif;
+    
+endif;
+
+
+
+[process_table_entry + 4] = READY;
+
+//Loop through the process table entires and increment the TICK field of each process.
+
+i = SHELL_PROCESS + 1; //start from 3rd process
+while(i < MAX_PROC_NUM-1) do
+    if([PROCESS_TABLE + i*16 + 4] != TERMINATED) then
+        [PROCESS_TABLE + i*16] = [PROCESS_TABLE + i*16] + 1;
+    endif;
+    i = i + 1;
+endwhile;
+
+
+call SCHEDULER;
+
+
+//code end
+
+restore;
+SP = [PROCESS_TABLE + ( [SYSTEM_STATUS_TABLE + 1] * 16) + 13];
+ireturn;

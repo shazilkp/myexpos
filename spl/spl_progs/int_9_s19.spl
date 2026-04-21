@@ -100,7 +100,7 @@ endwhile;
 [PTBR + 3] = "0100";
 
 
-multipush(R0,R1,R2,R3,R6);
+multipush(R0,R1,R2,R3,R6,PTBR);
 
 //get free page call
 
@@ -137,7 +137,7 @@ call MEMORY_MANAGER; //get free page
 [PTBR+19] = "0110";
 multipop(PTBR);
 
-multipop(R0,R1,R2,R3,R6);
+multipop(R0,R1,R2,R3,R6,PTBR);
 
 // iii Find out the number of blocks occupied by the file from inode table. Allocate same number of code pages by invoking the Get Free Page function and update the page table entries.
 alias size R4;
@@ -167,8 +167,9 @@ size=([INODE_TABLE+inodeIndex*16+2]+511)/512;
 
 multipush(R0,R1,R2,R3,R4,R6);
 multipush(PTBR);
-R1 = 5;
+R1 = GET_CODE_PAGE;
 R2 = [INODE_TABLE + inodeIndex*16 +8];
+R3 = [SYSTEM_STATUS_TABLE + 1];
 call MEMORY_MANAGER;
 
 [PTBR+8] = R0;
@@ -176,9 +177,10 @@ call MEMORY_MANAGER;
 multipop(PTBR);
 multipop(R0,R1,R2,R3,R4,R6);
 
+// breakpoint;
 //initialise disk map table to -1
 R0 = 0;
-while(R0 < 16)do
+while(R0 < 10)do
     [DISK_MAP_TABLE + 10 * [SYSTEM_STATUS_TABLE + 1] +R0] = -1;
     R0 = R0 + 1; 
 endwhile;
@@ -186,12 +188,12 @@ endwhile;
 
 //code entries
 R0 = 0;
-while(R0<size)  do
+while(R0<4)  do
     [DISK_MAP_TABLE + 10 * [SYSTEM_STATUS_TABLE + 1] + 4+R0] = [INODE_TABLE + inodeIndex*16 +8+R0];
     R0 = R0 + 1; 
 endwhile;
 
-
+//old 
 //11. Load the code blocks from the disk to the memory pages using disk load function (fno = 2) in device manager(mod_4)
 // R0=0;
 // while(R0<size)  do
@@ -213,7 +215,7 @@ SP=8*512;
 [[PTBR+16]*512]=[[PTBR+8]*512+1];
 [PROCESS_TABLE + ([SYSTEM_STATUS_TABLE +1] * 16) +13] =SP;
 
-
+// breakpoint;
 //13. Change SP to user stack, change the MODE FLAG back to user mode and return to user mode.
 [PROCESS_TABLE + ([SYSTEM_STATUS_TABLE+1]*16)+9] = 0;
 BP=SP-1;
